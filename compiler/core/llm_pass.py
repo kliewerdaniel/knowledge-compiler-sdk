@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from typing import Callable, Dict, List, Optional
 
 # Relative imports keep this module importable whether the package is reached
@@ -54,6 +55,7 @@ def run_model_pass(
     prompt_file: Optional[str] = None,
     repair_fn: Optional[Callable[[dict, Dict[str, dict], DiagnosticEmitter], dict]] = None,
     augment: bool = False,
+    max_retries: int = 3,
 ) -> int:
     """Execute a model-required pass against the local inference server.
 
@@ -70,6 +72,12 @@ def run_model_pass(
     rather than overwrite it (the model output is merged at the top level). This
     is how the three semantic passes cooperate on a single ``semantic-ir``
     without clobbering each other's output.
+
+    ``max_retries`` controls how many times a pass will re-attempt the model
+    call when it returns malformed/non-JSON output (common with local models).
+    Each retry appends an explicit "respond with only valid JSON" reminder and
+    backs off briefly, so a transiently garbled response does not abort the
+    whole pipeline.
     """
     store = ArtifactStore(build_dir)
     inputs = load_inputs(build_dir, consumes)
@@ -91,10 +99,30 @@ def run_model_pass(
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    try:
-        data = client.complete_json(system_prompt, user_prompt)
-    except Exception as e:  # noqa: BLE001 - surface model/parse failures clearly
-        print(f"error: inference failed: {e}", file=sys.stderr)
+    data = None
+    last_err: Optional[Exception] = None
+    base_prompt = user_prompt
+    for attempt in range(max_retries):
+        # On retries, remind the model to return strict JSON (local models
+        # frequently emit prose or trailing garbage after the object).
+        if attempt > 0:
+            user_prompt = (
+                base_prompt
+                + f"\n\n[retry {attempt}/{max_retries}] Respond with ONLY a single "
+                "valid JSON object and nothing else — no markdown fences, no "
+                "trailing commentary, no extra JSON objects."
+            )
+            time.sleep(min(2 ** attempt, 8))  # exponential backoff (capped)
+        try:
+            data = client.complete_json(system_prompt, user_prompt)
+            last_err = None
+            break
+        except Exception as e:  # noqa: BLE001 - surface model/parse failures clearly
+            last_err = e
+            print(f"warn: inference attempt {attempt + 1} failed: {e}", file=sys.stderr)
+    if data is None:
+        print(f"error: inference failed after {max_retries} attempts: {last_err}",
+              file=sys.stderr)
         return 1
 
     emitter = DiagnosticEmitter(produces, build_dir)

@@ -254,6 +254,68 @@ def test_run_model_pass_with_stubbed_client(tmp_path, monkeypatch):
     assert store.metadata("entity-ir")["producer_pass"] == "model-pass:entity-ir"
 
 
+def test_model_pass_retries_on_failure(tmp_path, monkeypatch):
+    """A pass retries when the model returns malformed JSON, then succeeds."""
+    from compiler.core import llm_pass
+
+    build = str(tmp_path)
+    store = ArtifactStore(build)
+    store.write("markdown-ir", {"documents": [{"id": "doc-1"}]}, pass_id="pass-01-parse")
+
+    calls = {"n": 0}
+
+    class _FlakyClient:
+        def complete_json(self, system, user, temperature=0.2):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                # simulate a model that emits garbage / no JSON object
+                raise ValueError("model response did not contain a JSON object")
+            return {"entities": [{"id": "e1", "label": "X", "type": "concept",
+                                  "span": {"doc": "doc-1", "section": "s"},
+                                  "confidence": 0.9}],
+                    "terms": [], "claims": []}
+
+    monkeypatch.setattr(llm_pass, "InferenceClient", lambda *a, **k: _FlakyClient())
+    rc = llm_pass.run_model_pass(
+        build_dir=build,
+        produces="entity-ir",
+        consumes=["markdown-ir"],
+        system_prompt="sys",
+        user_prompt_fn=lambda inputs: "user",
+        port=8080,
+        max_retries=3,
+    )
+    assert rc == 0
+    assert calls["n"] == 3  # failed twice, succeeded on 3rd
+    assert store.has("entity-ir")
+
+
+def test_model_pass_gives_up_after_max_retries(tmp_path, monkeypatch):
+    """If the model never returns JSON, the pass fails (not silent skip)."""
+    from compiler.core import llm_pass
+
+    build = str(tmp_path)
+    store = ArtifactStore(build)
+    store.write("markdown-ir", {"documents": [{"id": "doc-1"}]}, pass_id="pass-01-parse")
+
+    class _AlwaysBad:
+        def complete_json(self, system, user, temperature=0.2):
+            raise ValueError("no json")
+
+    monkeypatch.setattr(llm_pass, "InferenceClient", lambda *a, **k: _AlwaysBad())
+    rc = llm_pass.run_model_pass(
+        build_dir=build,
+        produces="entity-ir",
+        consumes=["markdown-ir"],
+        system_prompt="sys",
+        user_prompt_fn=lambda inputs: "user",
+        port=8080,
+        max_retries=2,
+    )
+    assert rc == 1  # failure, not 0
+    assert not store.has("entity-ir")  # nothing written
+
+
 def test_ontology_repair_drops_dangling_refs(tmp_path):
     """repair_fn drops relationships to unknown concepts and warns."""
     from compiler.core import llm_pass

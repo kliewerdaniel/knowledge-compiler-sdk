@@ -124,6 +124,13 @@ With a server listening (e.g. `llama.cpp` on :8080), the whole pipeline runs:
 python -m compiler.run --source notes --build build --local --port 8080 --model llama3.1
 ```
 
+Model passes are **resilient**: if the local model returns malformed or
+non-JSON output (common with local models), the scaffold retries up to 3 times
+with exponential backoff and an explicit "respond with only valid JSON" reminder
+before giving up. A pass that never produces valid JSON *fails loudly* (exit 1,
+no artifact written) rather than silently skipping — the build stays truthful.
+If the server is down, model passes report `failed` (not silently `skipped`).
+
 The deterministic parse runs first; each model pass calls your server, validates
 the JSON against its schema, enforces internal reference consistency (dropping
 dangling graph edges, flagging weak ontologies, annotating cycles), and writes
