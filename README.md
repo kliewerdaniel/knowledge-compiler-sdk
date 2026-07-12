@@ -143,10 +143,29 @@ into a **runnable Next.js application** under `build/knowledge-app/`:
 - `knowledge-app/components/KnowledgeGraphVisualizer.tsx` — an SVG knowledge-graph view
   (zero extra deps) that fetches `/api/graph`
 - `knowledge-app/app/<route>/page.tsx` — one page per declared route
-- `package.json`, `next.config.mjs`, `tsconfig.json`, `README.md`
+- `knowledge-app/app/evaluation/page.tsx` — the 9-dimension scorecard (observability built in)
+- `package.json`, `next.config.mjs`, `tsconfig.json`, `vercel.json`, `README.md`
 
-Run it with `cd build/knowledge-app && npm install && npm run dev`. Incremental mode
-reuses any artifact whose inputs are unchanged, so re-runs are cheap.
+Run it locally with `cd build/knowledge-app && npm install && npm run dev`
+(open http://localhost:3000; the evaluation dashboard is at `/evaluation`).
+Incremental mode reuses any artifact whose inputs are unchanged, so re-runs
+are cheap.
+
+### Deploy to Vercel
+
+The generated app is a standard Next.js project, so it deploys to Vercel as-is:
+
+```bash
+cd build/knowledge-app
+vercel              # preview
+vercel --prod       # production
+```
+
+`vercel.json` is emitted alongside the app (framework `nextjs`, build
+`npm install && npm run build`, output `.next`). The `/api/*` routes become
+serverless functions and read the compiled IRs from `data/` — no database, no
+external services. The whole thing is static-data + serverless, fully
+local-first in spirit.
 
 ## The pass registry (the extensibility model)
 

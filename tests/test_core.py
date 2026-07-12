@@ -654,6 +654,10 @@ def test_generated_app_is_runnable(tmp_path):
     # package.json present and valid json
     pkg = json.load(open(os.path.join(app_root, "package.json")))
     assert "next" in pkg["dependencies"]
+    # vercel.json present for one-command deploy
+    assert os.path.isfile(os.path.join(app_root, "vercel.json"))
+    vj = json.load(open(os.path.join(app_root, "vercel.json")))
+    assert vj.get("framework") == "nextjs"
 
 
 def test_coerce_json_handles_extra_data_and_array():
