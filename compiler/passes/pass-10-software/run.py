@@ -55,8 +55,14 @@ def to_pascal(name: str) -> str:
 
 
 def route_dir(route: str) -> str:
+    """Map a route path to an app-router directory segment.
+
+    The root route "/" becomes "" (so the page lands at app/page.tsx, the
+    Next.js root), not "index" (which would create a broken app/index route).
+    Nested routes like "/foo/bar" become "foo_bar".
+    """
     r = (route or "/").strip().strip("/")
-    return r.replace("/", "_") or "index"
+    return r.replace("/", "_")
 
 
 def _copy_artifacts(build_dir: str, app_root: str, emit: DiagnosticEmitter) -> dict:
@@ -372,7 +378,8 @@ def generate(build_dir: str, app: dict, emit: DiagnosticEmitter) -> None:
             f"  );\n"
             f"}}\n"
         )
-        _write(app_root, f"app/{rdir}/page.tsx", code)
+        page_rel = f"app/{rdir}/page.tsx" if rdir else "app/page.tsx"
+        _write(app_root, page_rel, code)
 
     # ---- evaluation page (observability built into the generated app) -----
     _write(app_root, "app/evaluation/page.tsx",
