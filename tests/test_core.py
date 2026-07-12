@@ -533,7 +533,7 @@ def test_pass10_generates_nextjs_app(tmp_path):
                             DiagnosticEmitter("application-ir", build))
     # runnable contract
     assert os.path.isfile(os.path.join(app_root, "package.json"))
-    assert os.path.isfile(os.path.join(app_root, "app", "index", "page.tsx"))
+    assert os.path.isfile(os.path.join(app_root, "app", "page.tsx"))
     assert os.path.isfile(os.path.join(app_root, "components", "KnowledgeGraphVisualizer.tsx"))
     assert os.path.isfile(os.path.join(app_root, "data", "graph-ir.json"))
     assert os.path.isfile(os.path.join(app_root, "app", "api", "graph", "route.ts"))
