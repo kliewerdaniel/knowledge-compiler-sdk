@@ -316,6 +316,58 @@ def test_model_pass_gives_up_after_max_retries(tmp_path, monkeypatch):
     assert not store.has("entity-ir")  # nothing written
 
 
+def test_evaluation_dashboard_generates(tmp_path):
+    """The report module scans evaluation.json and emits self-contained HTML."""
+    from compiler.reports.dashboard import collect, render_html, build_dashboard
+
+    build = str(tmp_path)
+    # write two evaluations with distinct scores
+    os.makedirs(os.path.join(build, "entity-ir"), exist_ok=True)
+    with open(os.path.join(build, "entity-ir", "evaluation.json"), "w") as fh:
+        json.dump({"artifact_type": "entity-ir",
+                   "scores": {d: 0.9 for d in
+                              ["completeness", "correctness", "coverage",
+                               "consistency", "hallucination", "traceability",
+                               "provenance", "confidence", "reproducibility"]},
+                   "overall": 0.9}, fh)
+    os.makedirs(os.path.join(build, "graph-ir"), exist_ok=True)
+    with open(os.path.join(build, "graph-ir", "evaluation.json"), "w") as fh:
+        json.dump({"artifact_type": "graph-ir",
+                   "scores": {d: 0.4 for d in
+                              ["completeness", "correctness", "coverage",
+                               "consistency", "hallucination", "traceability",
+                               "provenance", "confidence", "reproducibility"]},
+                   "overall": 0.4}, fh)
+
+    recs = collect(build)
+    assert len(recs) == 2
+    # sorted ascending by overall -> graph-ir (0.4) first
+    assert recs[0]["artifact"] == "graph-ir"
+
+    html = render_html(recs, build)
+    assert "<!doctype html>" in html
+    assert "window.__EVAL__" in html
+    # weakest artifact surfaces first in the rendered cards
+    assert html.index("graph-ir") < html.index("entity-ir")
+    # no external/CDN dependency
+    assert "http://" not in html and "https://" not in html
+
+    out = build_dashboard(build)
+    assert out and os.path.isfile(out)
+    assert out.endswith("evaluation_dashboard.html")
+
+
+def test_evaluation_dashboard_handles_missing(tmp_path):
+    """With no evaluations, the dashboard still renders (empty state)."""
+    from compiler.reports.dashboard import collect, render_html, build_dashboard
+    build = str(tmp_path)
+    assert collect(build) == []
+    html = render_html([], build)
+    assert "No evaluations found." in html
+    out = build_dashboard(build)
+    assert out and os.path.isfile(out)
+
+
 def test_ontology_repair_drops_dangling_refs(tmp_path):
     """repair_fn drops relationships to unknown concepts and warns."""
     from compiler.core import llm_pass

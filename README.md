@@ -184,6 +184,15 @@ coverage, consistency, hallucination, traceability, provenance, confidence,
 reproducibility — and the scorecard is committed as `evaluation.json`. Quality
 becomes measurable and trendable, not a feeling.
 
+After every build, the compiler emits a **self-contained evaluation dashboard**
+(`evaluation_dashboard.html`) that visualizes those 9-dimension scores for every
+artifact. It is a single static file with the data embedded inline and
+hand-rolled SVG/CSS — no CDN, no build step, no runtime services — so it opens
+straight from disk (`file://…/evaluation_dashboard.html`). Artifacts are sorted
+weakest-first so the lowest-scoring IR surfaces at the top, and each card shows
+a per-dimension bar (green ≥ 75, amber ≥ 50, red < 50) plus the overall score.
+This is the *observability is the OS* payoff: the loop inspects itself.
+
 ## Documentation
 
 - `docs/architecture.md` — why knowledge should be compiled like C.

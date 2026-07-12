@@ -37,6 +37,11 @@ from typing import Dict, List, Optional
 from .artifacts import ArtifactStore, artifact_exists, source_hashes_of
 from .registry import PassDeclaration, PassRegistry
 
+try:
+    from compiler.reports.dashboard import build_dashboard
+except ImportError:  # pragma: no cover - fallback when run as a script
+    from ..reports.dashboard import build_dashboard
+
 
 @dataclass
 class PlanStep:
@@ -231,6 +236,11 @@ class Compiler:
             os.path.join(self.store.build_dir, "plan.json"), "w", encoding="utf-8"
         ) as fh:
             fh.write(json.dumps(summary, ensure_ascii=False, indent=2))
+
+        # Emit the self-contained evaluation dashboard (observability payoff).
+        dash = build_dashboard(self.store.build_dir)
+        if dash:
+            summary["dashboard"] = os.path.relpath(dash, self.store.build_dir)
         return summary
 
     def _is_cached(self, decl: "PassDeclaration") -> bool:
