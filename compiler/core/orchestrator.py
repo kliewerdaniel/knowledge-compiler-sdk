@@ -185,11 +185,11 @@ class Compiler:
                 record["status"] = "skipped"
                 record["reason"] = "dry_run"
                 plan.skipped.append(decl.id)
-            elif os.path.isfile(entry):
+            elif os.path.isfile(entry) and not decl.model_required:
                 # Deterministic pass with a real entrypoint — run it directly.
                 ok = self._exec_pass(entry)
                 record["status"] = "ok" if ok else "failed"
-            elif local and decl.model_required:
+            elif local and decl.model_required and os.path.isfile(entry):
                 # Model pass executed against the user's local inference server.
                 ok = self._exec_model_pass(decl, port, model)
                 record["status"] = "ok" if ok else "failed"
@@ -199,7 +199,7 @@ class Compiler:
             else:
                 record["status"] = "skipped"
                 record["reason"] = (
-                    "no entrypoint script"
+                    "no deterministic entrypoint"
                     if not decl.model_required
                     else "model pass (use --local with a running inference server)"
                 )

@@ -92,3 +92,25 @@ Running with `--target application-ir` from a fresh source will plan all ten
 passes; only `pass-01-parse` executes with no model. With `--local
 --port 8080` (and a server listening) the model passes execute too. That is the
 correct, auditable behaviour — the core never invents LLM output.
+
+## Local inference (bring your own model)
+
+Model passes execute against **your own** OpenAI-compatible server — llama.cpp,
+Ollama, vLLM, LM Studio — on a port you control:
+
+```bash
+python -m compiler.run --source notes --build build --local --port 8080 --model llama3.1
+```
+
+Each model pass (via `compiler/core/llm_pass.py`) loads the prior IR, builds a
+small prompt from structured artifacts, calls the server for JSON, then:
+
+1. **validates** the JSON against the pass's JSON Schema;
+2. **repairs** internal references (drops graph edges to unknown nodes, flags
+   weak ontologies, annotates cycles) and emits the matching diagnostic;
+3. **writes** the artifact + `diagnostics.json` + `evaluation.json`.
+
+No cloud API, no key, no data leaves the machine. The model only sees
+structured artifacts, never raw Markdown. If the server is unreachable the pass
+fails fast (a ~2s connection probe) and reports `failed` — the build never
+invents LLM output.

@@ -103,6 +103,21 @@ never raw Markdown, so intelligence stays in the artifacts. If the server is
 down, model passes report `failed` (not silently `skipped`) — the build stays
 truthful. CI installs `openai` only when the `--local` path is exercised.
 
+### End-to-end local run
+
+With a server listening (e.g. `llama.cpp` on :8080), the whole pipeline runs:
+
+```bash
+# start your server, then:
+python -m compiler.run --source notes --build build --local --port 8080 --model llama3.1
+```
+
+The deterministic parse runs first; each model pass calls your server, validates
+the JSON against its schema, enforces internal reference consistency (dropping
+dangling graph edges, flagging weak ontologies, annotating cycles), and writes
+the artifact. The result is a complete `application-ir` plus GraphML/Mermaid for
+the knowledge graph — all inspectable in `build/`.
+
 ## The pass registry (the extensibility model)
 
 Passes are **declared declaratively** in YAML — not hardcoded. The orchestrator

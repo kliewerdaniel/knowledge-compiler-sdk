@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """pass-10-software entrypoint (model-required).
 
-Reads the declared input IR(s), drives the local inference server, and writes
-the application-ir artifact. Run by the orchestrator when `--local` is set.
+Reads the declared input IR(s) (as compact summaries), drives the local
+inference server, and writes the application-ir artifact. Runs against your
+server when `--local` is set.
 
 Invocation: python run.py <build_dir> [--port 8080] [--model NAME]
 """
@@ -23,18 +24,29 @@ PRODUCES = "application-ir"
 CONSUMES = ["application-ir", "reasoning-ir", "semantic-ir"]
 
 
+def _summarize(name, data):
+    """Compact, token-friendly summary of an input artifact."""
+    if not isinstance(data, dict):
+        return name + ": (non-object)"
+    out = {name: {"keys": list(data.keys())}}
+    # include counts + a couple of sample labels so the model has context
+    for key in ("documents", "entities", "concepts", "nodes", "themes",
+                "observations", "pages", "components", "relationships", "edges"):
+        if key in data and isinstance(data[key], list):
+            sample = [str(x.get("label", x.get("id", x.get("text", ""))))[:40]
+                      for x in data[key][:3]]
+            out[name][key] = {"count": len(data[key]), "sample": sample}
+    return out
+
+
 def build_user_prompt(inputs):
-    parts = []
-    for art, data in inputs.items():
-        if isinstance(data, dict):
-            parts.append(art + ": keys=" + str(list(data.keys())))
-    brief = "\n".join(parts)
-    full = json.dumps(inputs, ensure_ascii=False)[:12000]
+    summary = {art: _summarize(art, data) for art, data in inputs.items()}
     return (
-        "Available input artifacts:\n" + brief + "\n\n"
-        "Full artifacts (truncated):\n" + full + "\n\n"
-        "Return the JSON object required by the application-ir schema. "
-        "Every output element MUST cite a provenance span or source id."
+        "Input artifact summaries:\n"
+        + json.dumps(summary, ensure_ascii=False)
+        + "\n\nReturn the JSON object required by the application-ir schema. "
+        "Every output element MUST cite a provenance span or source id from "
+        "the inputs above."
     )
 
 

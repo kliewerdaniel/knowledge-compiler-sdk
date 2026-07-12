@@ -41,7 +41,8 @@ class InferenceClient:
         host: str = "localhost",
         model: Optional[str] = None,
         api_key: str = "not-needed",
-        timeout: float = 600.0,
+        timeout: float = 120.0,
+        connect_timeout: float = 2.0,
     ):
         if OpenAI is None:
             raise RuntimeError(
@@ -51,6 +52,21 @@ class InferenceClient:
         self.base_url = f"http://{host}:{port}/v1"
         self.model = model or os.environ.get("KC_MODEL") or "local-model"
         self.timeout = timeout
+        # Probe the server up front so a dead port fails fast (seconds, not the
+        # full request timeout). Local-first means the user's server should be up.
+        import socket
+
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(connect_timeout)
+        try:
+            s.connect((host, port))
+        except OSError as e:
+            raise RuntimeError(
+                f"no inference server reachable at {host}:{port} "
+                f"(start llama.cpp/Ollama/vLLM, or drop --local). {e}"
+            ) from e
+        finally:
+            s.close()
         # llama.cpp / Ollama accept any non-empty key.
         self._client = OpenAI(base_url=self.base_url, api_key=api_key)
 

@@ -52,10 +52,18 @@ def run_model_pass(
     port: int = 8080,
     model: Optional[str] = None,
     prompt_file: Optional[str] = None,
+    repair_fn: Optional[Callable[[dict, Dict[str, dict], DiagnosticEmitter], dict]] = None,
 ) -> int:
     """Execute a model-required pass against the local inference server.
 
     Returns a process exit code (0 ok, 2 usage/config error, 1 failure).
+
+    ``repair_fn(data, inputs, emitter)`` is an optional hook a pass supplies to
+    enforce *internal reference consistency* — e.g. drop graph edges that point
+    at non-existent node ids, or flag ontology relationships with unknown
+    concept ids. This keeps a multi-stage chain coherent even when the model
+    drifts, and turns dangling references into diagnostics instead of silent
+    corruption.
     """
     store = ArtifactStore(build_dir)
     inputs = load_inputs(build_dir, consumes)
@@ -83,6 +91,10 @@ def run_model_pass(
         print(f"error: inference failed: {e}", file=sys.stderr)
         return 1
 
+    emitter = DiagnosticEmitter(produces, build_dir)
+    if repair_fn is not None:
+        data = repair_fn(data, inputs, emitter)
+
     schema_id = produces
     meta = store.write(
         produces,
@@ -93,7 +105,6 @@ def run_model_pass(
     )
     # Validate *after* writing so we can read the artifact back.
     errs = store.validate(produces, schema_id)
-    emitter = DiagnosticEmitter(produces, build_dir)
     if errs:
         for e in errs:
             emitter.error("CORRECTNESS", f"schema validation: {e}")

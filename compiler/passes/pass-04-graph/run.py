@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """pass-04-graph entrypoint (model-required).
 
-Reads the declared input IR(s), drives the local inference server, and writes
-the graph-ir artifact. Run by the orchestrator when `--local` is set.
+Materialises the Ontology IR into a Knowledge Graph IR: nodes, typed edges,
+per-edge confidence, and provenance. Also writes GraphML + Mermaid views for
+human inspection. Runs against the user's local inference server when
+`--local` is set. A repair step drops edges that reference unknown nodes and
+detects cycles (annotated, not dropped).
 
 Invocation: python run.py <build_dir> [--port 8080] [--model NAME]
 """
@@ -18,23 +21,29 @@ if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
 from core.llm_pass import parse_port_model, run_model_pass
+from core.diagnostics import DiagnosticEmitter
 
 PRODUCES = "graph-ir"
 CONSUMES = ["ontology-ir", "markdown-ir"]
 
 
-def build_user_prompt(inputs):
-    parts = []
-    for art, data in inputs.items():
-        if isinstance(data, dict):
-            parts.append(art + ": keys=" + str(list(data.keys())))
-    brief = "\n".join(parts)
-    full = json.dumps(inputs, ensure_ascii=False)[:12000]
+def build_user_prompt(inputs: dict) -> str:
+    oi = inputs["ontology-ir"]
+    slim = {
+        "concepts": [
+            {"id": c["id"], "label": c["label"]}
+            for c in oi.get("concepts", [])
+        ],
+        "relationships": oi.get("relationships", []),
+        "hierarchies": oi.get("hierarchies", []),
+    }
     return (
-        "Available input artifacts:\n" + brief + "\n\n"
-        "Full artifacts (truncated):\n" + full + "\n\n"
-        "Return the JSON object required by the graph-ir schema. "
-        "Every output element MUST cite a provenance span or source id."
+        "Ontology IR:\n"
+        + json.dumps(slim, ensure_ascii=False)
+        + "\n\nProduce graph-ir: nodes[] (one per concept, concept_ref=concept id) "
+        "and edges[] (one per relationship/hierarchy, source/target = concept "
+        "ids, with confidence and provenance). Respond with the graph-ir JSON "
+        "object only."
     )
 
 
@@ -42,7 +51,106 @@ SYSTEM_PROMPT = open(os.path.join(os.path.dirname(__file__), "prompt.md"),
                     encoding="utf-8").read()
 
 
-def main():
+def repair(data, inputs, emitter: DiagnosticEmitter) -> dict:
+    nodes = data.get("nodes", [])
+    node_ids = {n.get("id") for n in nodes if n.get("id")}
+    if not node_ids:
+        emitter.error("MISSING_EVIDENCE", "graph produced zero nodes")
+        return data
+
+    edges = data.get("edges", [])
+    kept = []
+    for e in edges:
+        if e.get("source") in node_ids and e.get("target") in node_ids:
+            kept.append(e)
+        else:
+            emitter.warning(
+                "UNREFERENCED_ENTITY",
+                f"edge {e.get('id')} references unknown node; dropped",
+            )
+    data["edges"] = kept
+
+    # cycle detection (DFS) -> annotate, keep, warn
+    adj = {}
+    for e in kept:
+        adj.setdefault(e["source"], []).append(e["target"])
+    seen, in_stack, cyclic = set(), set(), set()
+
+    def visit(u):
+        seen.add(u)
+        in_stack.add(u)
+        for v in adj.get(u, []):
+            if v in in_stack:
+                cyclic.add((u, v))
+            elif v not in seen:
+                visit(v)
+        in_stack.discard(u)
+
+    for n in list(node_ids):
+        if n not in seen:
+            visit(n)
+    if cyclic:
+        emitter.warning(
+            "CIRCULAR_REFERENCE",
+            f"{len(cyclic)} cycle edge(s) detected; annotated cycle:true",
+        )
+        cyc_pairs = {(a, b) for a, b in cyclic}
+        for e in kept:
+            if (e["source"], e["target"]) in cyc_pairs:
+                e["cycle"] = True
+
+    if kept:
+        deg = sum(len(adj.get(n, [])) for n in node_ids) / max(1, len(node_ids))
+        if deg < 1.5:
+            emitter.warning("SPARSE_GRAPH", f"mean degree {deg:.2f} < 1.5")
+
+    # Write derived GraphML + Mermaid views for humans.
+    build_dir = emitter.build_dir
+    _write_graphml(build_dir, nodes, kept)
+    _write_mermaid(build_dir, nodes, kept)
+    return data
+
+
+def _write_graphml(build_dir, nodes, edges) -> None:
+    import xml.sax.saxutils as su
+
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<graphml xmlns="http://graphml.graphdrawing.org/xmlns">',
+             '  <graph id="knowledge" edgedefault="directed">']
+    for n in nodes:
+        lines.append(
+            f'    <node id="{su.escape(str(n.get("id")))}">'
+            f'<data key="label">{su.escape(str(n.get("label","")))}</data></node>'
+        )
+    for e in edges:
+        lines.append(
+            f'    <edge source="{su.escape(str(e.get("source")))}" '
+            f'target="{su.escape(str(e.get("target")))}">'
+            f'<data key="type">{su.escape(str(e.get("type","")))}</data></edge>'
+        )
+    lines.append("  </graph>")
+    lines.append("</graphml>")
+    gdir = os.path.join(build_dir, "graph-ir")
+    os.makedirs(gdir, exist_ok=True)
+    with open(os.path.join(gdir, "graph.graphml"), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def _write_mermaid(build_dir, nodes, edges) -> None:
+    lines = ["graph TD"]
+    labels = {n.get("id"): n.get("label", n.get("id")) for n in nodes}
+    for n in nodes:
+        lines.append(f'  {n.get("id")}["{labels.get(n.get("id"), n.get("id"))}"]')
+    for e in edges:
+        t = e.get("type", "->")
+        lines.append(f'  {e.get("source")} -- {t} --> {e.get("target")}')
+    gdir = os.path.join(build_dir, "graph-ir")
+    os.makedirs(gdir, exist_ok=True)
+    with open(os.path.join(gdir, "graph.mmd"), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def main() -> int:
     ns = parse_port_model(sys.argv[1:])
     return run_model_pass(
         build_dir=ns.build_dir,
@@ -53,6 +161,7 @@ def main():
         port=ns.port,
         model=ns.model,
         prompt_file=os.path.join(os.path.dirname(__file__), "prompt.md"),
+        repair_fn=repair,
     )
 
 

@@ -249,3 +249,61 @@ def test_run_model_pass_with_stubbed_client(tmp_path, monkeypatch):
     assert data["entities"][0]["label"] == "X"
     assert store.metadata("entity-ir")["producer_pass"] == "model-pass:entity-ir"
 
+
+def test_ontology_repair_drops_dangling_refs(tmp_path):
+    """repair_fn drops relationships to unknown concepts and warns."""
+    from compiler.core import llm_pass
+    from compiler.core.diagnostics import DiagnosticEmitter
+
+    build = str(tmp_path)
+    os.makedirs(os.path.join(build, "ontology-ir"), exist_ok=True)
+    data = {
+        "concepts": [{"id": "c1", "label": "A"}, {"id": "c2", "label": "B"}],
+        "relationships": [
+            {"id": "r1", "source": "c1", "target": "c2", "type": "depends-on"},
+            {"id": "r2", "source": "c1", "target": "GHOST", "type": "depends-on"},
+        ],
+        "hierarchies": [],
+        "aliases": [],
+    }
+    emitter = DiagnosticEmitter("ontology-ir", build)
+    # import the actual repair from the pass
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "p03", os.path.join(os.path.dirname(__file__), "..",
+                            "compiler", "passes", "pass-03-ontology", "run.py"))
+    p03 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(p03)
+    repaired = p03.repair(data, {}, emitter)
+    rel_ids = [r["id"] for r in repaired["relationships"]]
+    assert "r1" in rel_ids and "r2" not in rel_ids
+    diag = emitter.dump()
+    assert any(d["code"] == "UNREFERENCED_ENTITY" for d in diag["diagnostics"])
+
+
+def test_graph_repair_detects_cycles(tmp_path):
+    """repair_fn annotates cycle edges and writes GraphML/Mermaid."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "p04", os.path.join(os.path.dirname(__file__), "..",
+                            "compiler", "passes", "pass-04-graph", "run.py"))
+    p04 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(p04)
+    from compiler.core.diagnostics import DiagnosticEmitter
+
+    build = str(tmp_path)
+    data = {
+        "nodes": [{"id": "n1", "label": "A", "concept_ref": "c1"},
+                  {"id": "n2", "label": "B", "concept_ref": "c2"}],
+        "edges": [{"id": "e1", "source": "n1", "target": "n2", "type": "x"},
+                  {"id": "e2", "source": "n2", "target": "n1", "type": "y"}],
+    }
+    emitter = DiagnosticEmitter("graph-ir", build)
+    p04.repair(data, {}, emitter)
+    cyc = [e for e in data["edges"] if e.get("cycle")]
+    assert len(cyc) >= 1
+    assert os.path.isfile(os.path.join(build, "graph-ir", "graph.graphml"))
+    assert os.path.isfile(os.path.join(build, "graph-ir", "graph.mmd"))
+
