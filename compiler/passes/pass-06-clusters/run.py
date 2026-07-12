@@ -65,6 +65,7 @@ def main():
         port=ns.port,
         model=ns.model,
         prompt_file=os.path.join(os.path.dirname(__file__), "prompt.md"),
+        augment=True,  # merge themes/clusters onto pass-05's embeddings
     )
 
 

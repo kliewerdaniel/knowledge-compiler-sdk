@@ -2,7 +2,9 @@
 """knowledgec — the Knowledge Compiler command line driver.
 
 Usage:
-    python -m compiler.run --source PATH [--build BUILD] [--target IR] [--dry]
+    python -m compiler.run --source PATH [--build BUILD] [--target IR]
+                            [--local --port 8080] [--incremental]
+                            [--only pass-04-graph] [--resume]
 
 This is intentionally thin. It wires together the registry, the orchestrator
 and an ArtifactStore, then prints a machine-readable summary. The *intelligence*
@@ -27,7 +29,7 @@ PASSES_ROOT = os.path.join(_HERE, "passes")
 DEFAULT_BUILD = os.path.join(os.getcwd(), "build")
 
 
-def main(argv=None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="knowledgec", description=__doc__)
     ap.add_argument(
         "--source",
@@ -61,7 +63,34 @@ def main(argv=None) -> int:
         default=os.environ.get("KC_MODEL"),
         help="Model name to request from the local server (env KC_MODEL).",
     )
-    args = ap.parse_args(argv)
+    ap.add_argument(
+        "--embed-model",
+        default=os.environ.get("KC_EMBED_MODEL"),
+        help="Ollama embedding model for the fallback path (env KC_EMBED_MODEL).",
+    )
+    ap.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Skip passes whose output already exists and whose inputs are "
+        "unchanged (content-hash based caching).",
+    )
+    ap.add_argument(
+        "--only",
+        default=None,
+        help="Run only the named pass id (e.g. pass-04-graph). Implies a "
+        "single-step plan; inputs must already exist.",
+    )
+    ap.add_argument(
+        "--resume",
+        action="store_true",
+        help="Re-run from the first pass whose output is missing or stale; "
+        "equivalent to --incremental but always executes the final target.",
+    )
+    return ap
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
 
     # Stage the source into the build dir so pass-01-parse can find it.
     build_dir = os.path.abspath(args.build)
@@ -91,16 +120,21 @@ def main(argv=None) -> int:
         local=args.local,
         port=args.port,
         model=args.model,
+        incremental=args.incremental or args.resume,
+        only=args.only,
+        embed_model=args.embed_model,
     )
 
     steps = summary["plan"]["steps"]
     skipped = summary["plan"]["skipped"]
     print(f"\nplan: {len(steps)} step(s), {len(skipped)} skipped")
+    flagmap = {"ok": "✓", "failed": "✗", "skipped": "·", "cached": "≡"}
     for rec in summary["records"]:
-        flag = {"ok": "✓", "failed": "✗", "skipped": "·"}.get(
-            rec["status"], "?"
+        flag = flagmap.get(rec["status"], "?")
+        extra = f" ({rec['reason']})" if rec.get("reason") else ""
+        print(
+            f"  {flag} {rec['pass_id']:<22} -> {rec['produces']}{extra}"
         )
-        print(f"  {flag} {rec['pass_id']:<22} -> {rec['produces']}")
 
     print(f"\nbuild dir: {build_dir}")
     print(f"summary:   {os.path.join(build_dir, 'plan.json')}")

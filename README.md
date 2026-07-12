@@ -91,11 +91,23 @@ python -m compiler.run --source notes --build build --local --port 8080 --model 
 
 Flags:
 
-| Flag     | Default (env)     | Meaning                                         |
-|----------|-------------------|-------------------------------------------------|
-| `--local`| —                 | Execute model passes via local inference.       |
-| `--port` | `8080` (`KC_PORT`)| Port of the `/v1` inference server.              |
-| `--model`| `KC_MODEL`        | Model name to request from the server.          |
+| Flag            | Default (env)        | Meaning                                                   |
+|-----------------|----------------------|-----------------------------------------------------------|
+| `--local`       | —                    | Execute model passes via local inference.                 |
+| `--port`        | `8080` (`KC_PORT`)   | Port of the `/v1` inference server.                        |
+| `--model`       | `KC_MODEL`           | Model name to request from the server.                    |
+| `--embed-model` | `KC_EMBED_MODEL`     | Ollama embedding model for the fallback path.            |
+| `--incremental` | —                    | Skip passes whose inputs are unchanged (hash caching).   |
+| `--only`        | —                    | Run a single pass by id (e.g. `pass-04-graph`).          |
+| `--resume`      | —                    | Like `--incremental`, but always rebuilds the target.     |
+
+**Embeddings & the Ollama fallback.** The embedding pass (`pass-05`) needs
+vector embeddings. Many chat servers — including a llama.cpp instance started
+*without* `--embeddings` — do not expose `/v1/embeddings`. In that case the
+compiler transparently falls back to **Ollama** via its native
+`/api/embeddings` endpoint (e.g. `nomic-embed-text`). Everything stays local:
+no cloud, no key. Point it at your setup with
+`--embed-model nomic-embed-text:latest`.
 
 The client (`compiler/core/inference.py`) speaks the OpenAI Chat Completions
 protocol and asks for JSON; the model only ever sees **structured artifacts**,
@@ -115,8 +127,10 @@ python -m compiler.run --source notes --build build --local --port 8080 --model 
 The deterministic parse runs first; each model pass calls your server, validates
 the JSON against its schema, enforces internal reference consistency (dropping
 dangling graph edges, flagging weak ontologies, annotating cycles), and writes
-the artifact. The result is a complete `application-ir` plus GraphML/Mermaid for
-the knowledge graph — all inspectable in `build/`.
+the artifact. The final pass (`pass-10-software`) turns the `application-ir`
+into a **deployable Next.js scaffold** under `build/app/` (pages, components,
+API routes, `package.json`, a deployment README). Incremental mode reuses any
+artifact whose inputs are unchanged, so re-runs are cheap.
 
 ## The pass registry (the extensibility model)
 

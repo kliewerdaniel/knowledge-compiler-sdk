@@ -83,6 +83,34 @@ def repair(data, inputs, emitter: DiagnosticEmitter) -> dict:
     ]
     data["hierarchies"] = kept_h
 
+    # Normalize relationship vocabulary to the schema's controlled set.
+    # Models often emit UPPER_SNAKE aliases; map them so validation passes.
+    ALIASES = {
+        "part_of": "part-of", "PART_OF": "part-of", "partof": "part-of",
+        "is_a": "specializes", "IS_A": "specializes", "isa": "specializes",
+        "subclass_of": "specializes", "specializes_in": "specializes",
+        "depends_on": "depends-on", "DEPENDS_ON": "depends-on",
+        "uses": "depends-on", "requires": "depends-on",
+        "implements": "implements", "IMPLEMENTS": "implements",
+        "enables": "enables", "ENABLES": "enables",
+        "references": "references", "REFERENCES": "references", "ref": "references",
+        "contradicts": "contradicts", "CONTRADICTS": "contradicts",
+    }
+    ALLOWED = {"implements", "depends-on", "specializes", "contradicts",
+               "enables", "references", "part-of"}
+    norm = []
+    for r in data.get("relationships", []):
+        t = r.get("type")
+        if t in ALLOWED:
+            norm.append(r)
+        elif t in ALIASES:
+            r = dict(r); r["type"] = ALIASES[t]
+            norm.append(r)
+            emitter.info("VOCAB", f"normalized relationship type '{t}' -> '{ALIASES[t]}'")
+        else:
+            emitter.warning("VOCAB", f"unknown relationship type '{t}'; dropped")
+    data["relationships"] = norm
+
     # weak-ontology heuristic
     if len(rels) < 1.5 * len(concepts):
         emitter.warning(

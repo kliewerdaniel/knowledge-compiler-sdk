@@ -34,7 +34,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from .artifacts import ArtifactStore, artifact_exists
+from .artifacts import ArtifactStore, artifact_exists, source_hashes_of
 from .registry import PassDeclaration, PassRegistry
 
 
@@ -166,8 +166,19 @@ class Compiler:
         local: bool = False,
         port: int = 8080,
         model: Optional[str] = None,
+        incremental: bool = False,
+        only: Optional[str] = None,
+        embed_model: Optional[str] = None,
     ) -> Dict:
-        plan = self.plan_to(target)
+        if only:
+            # Single-pass plan: only the named pass runs (inputs must pre-exist).
+            decl = self.registry.get(only)
+            plan = Plan(target=only,
+                        steps=[PlanStep(pass_id=decl.id, produces=decl.produces,
+                                        consumes=decl.consumes)],
+                        skipped=[])
+        else:
+            plan = self.plan_to(target)
         records: List[Dict] = []
         produced: set[str] = set(self.store.available())
 
@@ -185,13 +196,17 @@ class Compiler:
                 record["status"] = "skipped"
                 record["reason"] = "dry_run"
                 plan.skipped.append(decl.id)
+            elif incremental and self._is_cached(decl):
+                # Inputs unchanged since this artifact was produced -> reuse.
+                record["status"] = "cached"
+                record["reason"] = "inputs unchanged"
             elif os.path.isfile(entry) and not decl.model_required:
                 # Deterministic pass with a real entrypoint — run it directly.
                 ok = self._exec_pass(entry)
                 record["status"] = "ok" if ok else "failed"
             elif local and decl.model_required and os.path.isfile(entry):
                 # Model pass executed against the user's local inference server.
-                ok = self._exec_model_pass(decl, port, model)
+                ok = self._exec_model_pass(decl, port, model, embed_model)
                 record["status"] = "ok" if ok else "failed"
                 if not ok:
                     record["reason"] = "local inference failed"
@@ -218,6 +233,27 @@ class Compiler:
             fh.write(json.dumps(summary, ensure_ascii=False, indent=2))
         return summary
 
+    def _is_cached(self, decl: "PassDeclaration") -> bool:
+        """True if ``decl.produces`` exists and its inputs are unchanged.
+
+        Compares the current content hashes of the consumed artifacts against
+        the ``source_hashes`` recorded when the artifact was produced. If any
+        consumed artifact is missing or its hash differs, the cache is invalid.
+        """
+        if not self.store.has(decl.produces):
+            return False
+        meta = self.store.metadata(decl.produces)
+        recorded = meta.get("source_hashes") or {}
+        if not recorded and decl.consumes:
+            # No provenance recorded (e.g. a v0 artifact) -> don't trust cache.
+            return False
+        current = source_hashes_of(self.store.build_dir, decl.consumes)
+        # present + matching for every consumed artifact
+        for c in decl.consumes:
+            if recorded.get(c) != current.get(c):
+                return False
+        return True
+
     def _exec_pass(self, entry: str) -> bool:
         try:
             result = subprocess.run(
@@ -231,28 +267,67 @@ class Compiler:
             return False
 
     def _exec_model_pass(
-        self, decl: "PassDeclaration", port: int, model: Optional[str]
+        self, decl: "PassDeclaration", port: int, model: Optional[str],
+        embed_model: Optional[str] = None,
     ) -> bool:
         """Execute a model-required pass via the shared llm_pass scaffold.
 
         The pass directory must contain ``run.py`` (the model entrypoint) that
-        accepts ``<build_dir> --port <p> [--model <m>]`` and uses
-        ``core.llm_pass.run_model_pass``. Because the deterministic branch above
-        only fires when an entrypoint exists, we *require* model passes to ship
-        a ``run.py`` too — it just delegates to the scaffold instead of doing
-        raw parsing. This keeps the orchestrator uniform: every pass is a
+        accepts ``<build_dir> --port <p> [--model <m>] [--embed-model <e>]`` and
+        uses ``core.llm_pass.run_model_pass``. Because the deterministic branch
+        above only fires when an entrypoint exists, we *require* model passes to
+        ship a ``run.py`` too — it just delegates to the scaffold instead of
+        doing raw parsing. This keeps the orchestrator uniform: every pass is a
         ``run.py``; the difference is deterministic vs. model-driven.
         """
+    def _pass_env(self) -> Dict[str, str]:
+        """Build an env for pass subprocesses that makes both the repo root and
+        the ``compiler`` package importable, so every pass entrypoint can use
+        either ``import compiler.core`` or ``import core`` regardless of how it
+        bootstrapped its own sys.path."""
+        root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )  # .../knowledge-compiler-sdk
+        compiler_pkg = os.path.join(root, "compiler")
+        existing = os.environ.get("PYTHONPATH", "")
+        parts = [root, compiler_pkg] + ([existing] if existing else [])
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(parts)
+        return env
+
+    def _exec_pass(self, entry: str) -> bool:
+        try:
+            result = subprocess.run(
+                [sys.executable, entry, self.store.build_dir],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                env=self._pass_env(),
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _exec_model_pass(
+        self, decl: "PassDeclaration", port: int, model: Optional[str],
+        embed_model: Optional[str] = None,
+    ) -> bool:
         entry = os.path.join(decl.path, "run.py")
         if not os.path.isfile(entry):
             return False
+        cmd = [sys.executable, entry, self.store.build_dir,
+               "--port", str(port)]
+        if model:
+            cmd += ["--model", model]
+        if embed_model:
+            cmd += ["--embed-model", embed_model]
         try:
             result = subprocess.run(
-                [sys.executable, entry, self.store.build_dir,
-                 "--port", str(port)] + (["--model", model] if model else []),
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=900,
+                env=self._pass_env(),
             )
             if result.returncode != 0:
                 sys.stderr.write(result.stderr)

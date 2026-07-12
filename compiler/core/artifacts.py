@@ -54,6 +54,49 @@ def read_artifact(build_dir: str, artifact_type: str) -> Dict[str, Any]:
         return json.load(fh)
 
 
+def content_hash_of(build_dir: str, artifact_type: str) -> Optional[str]:
+    """Return the stored content hash of an artifact, or None if absent."""
+    meta = read_metadata(build_dir, artifact_type)
+    return meta.get("content_hash")
+
+
+def source_hashes_of(build_dir: str, artifacts: List[str]) -> Dict[str, str]:
+    """Map each (present) artifact name to its current content hash.
+
+    The special name ``"source"`` refers to the staged source directory
+    (``<build>/source``); its hash is computed over the concatenated canonical
+    JSON of every ``.md`` file so incremental caching can detect source edits.
+    """
+    out = {}
+    for a in artifacts:
+        if a == "source":
+            h = _source_dir_hash(build_dir)
+            if h is not None:
+                out[a] = h
+            continue
+        h = content_hash_of(build_dir, a)
+        if h is not None:
+            out[a] = h
+    return out
+
+
+def _source_dir_hash(build_dir: str) -> Optional[str]:
+    """Hash of all staged .md files under <build>/source, stable across order."""
+    import hashlib
+
+    src = os.path.join(build_dir, "source")
+    if not os.path.isdir(src):
+        return None
+    parts = []
+    for fn in sorted(os.listdir(src)):
+        if fn.endswith(".md"):
+            with open(os.path.join(src, fn), "r", encoding="utf-8") as fh:
+                parts.append(fn + "\u0000" + fh.read())
+    if not parts:
+        return None
+    return hashlib.sha256("\u0000".join(parts).encode("utf-8")).hexdigest()
+
+
 def read_metadata(build_dir: str, artifact_type: str) -> Dict[str, Any]:
     p = os.path.join(artifact_path(build_dir, artifact_type), "metadata.json")
     if not os.path.isfile(p):
@@ -108,12 +151,15 @@ def write_artifact(
     schema_id: Optional[str] = None,
     schema_dir: str = DEFAULT_SCHEMA_DIR,
     diagnostics: Optional[Dict[str, Any]] = None,
+    source_hashes: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Persist an artifact immutably.
 
     Returns the metadata dict that was written (useful for callers/tests).
     """
     source_artifacts = source_artifacts or []
+    if source_hashes is None:
+        source_hashes = source_hashes_of(build_dir, source_artifacts)
     os.makedirs(artifact_path(build_dir, artifact_type), exist_ok=True)
 
     data_doc = _stable_json(data)
@@ -130,6 +176,7 @@ def write_artifact(
         "producer_pass": pass_id,
         "schema_id": schema_id,
         "source_artifacts": source_artifacts,
+        "source_hashes": source_hashes or {},
         "content_hash": content_hash,
         "tool_version": "knowledge-compiler-sdk/0.1.0",
     }
@@ -192,6 +239,7 @@ class ArtifactStore:
         source_artifacts: Optional[List[str]] = None,
         schema_id: Optional[str] = None,
         diagnostics: Optional[Dict[str, Any]] = None,
+        source_hashes: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         return write_artifact(
             self.build_dir,
@@ -202,6 +250,7 @@ class ArtifactStore:
             schema_id=schema_id,
             schema_dir=self.schema_dir,
             diagnostics=diagnostics,
+            source_hashes=source_hashes,
         )
 
     def validate(self, artifact_type: str, schema_id: Optional[str] = None):

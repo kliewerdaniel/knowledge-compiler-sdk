@@ -53,6 +53,7 @@ def run_model_pass(
     model: Optional[str] = None,
     prompt_file: Optional[str] = None,
     repair_fn: Optional[Callable[[dict, Dict[str, dict], DiagnosticEmitter], dict]] = None,
+    augment: bool = False,
 ) -> int:
     """Execute a model-required pass against the local inference server.
 
@@ -64,6 +65,11 @@ def run_model_pass(
     concept ids. This keeps a multi-stage chain coherent even when the model
     drifts, and turns dangling references into diagnostics instead of silent
     corruption.
+
+    ``augment=True`` makes the pass *extend* an existing ``produces`` artifact
+    rather than overwrite it (the model output is merged at the top level). This
+    is how the three semantic passes cooperate on a single ``semantic-ir``
+    without clobbering each other's output.
     """
     store = ArtifactStore(build_dir)
     inputs = load_inputs(build_dir, consumes)
@@ -95,6 +101,13 @@ def run_model_pass(
     if repair_fn is not None:
         data = repair_fn(data, inputs, emitter)
 
+    if augment and store.has(produces):
+        existing = store.read(produces)
+        merged = dict(existing)
+        merged.update(data)
+        data = merged
+        emitter.info("AUGMENT", f"merged onto existing {produces}")
+
     schema_id = produces
     meta = store.write(
         produces,
@@ -122,9 +135,13 @@ def run_model_pass(
 
 
 def parse_port_model(argv) -> argparse.Namespace:
-    """Common CLI flags for model passes: --port (default 8080) and --model."""
+    """Common CLI flags for model passes: --port (default 8080), --model,
+    --embed-model. Uses ``parse_known_args`` so a pass can ignore flags the
+    orchestrator forwards on its behalf (e.g. --embed-model for passes that
+    don't need it)."""
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("build_dir", nargs="?", default=os.getcwd())
     ap.add_argument("--port", type=int, default=int(os.environ.get("KC_PORT", "8080")))
     ap.add_argument("--model", default=os.environ.get("KC_MODEL"))
-    return ap.parse_args(argv)
+    ap.add_argument("--embed-model", default=os.environ.get("KC_EMBED_MODEL"))
+    return ap.parse_known_args(argv)[0]

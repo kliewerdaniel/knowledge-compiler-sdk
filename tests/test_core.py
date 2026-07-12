@@ -14,6 +14,7 @@ from compiler.core import (
     ArtifactStore,
     Compiler,
     DiagnosticEmitter,
+    PassRegistry,
     evaluate_artifact,
 )
 
@@ -306,4 +307,187 @@ def test_graph_repair_detects_cycles(tmp_path):
     assert len(cyc) >= 1
     assert os.path.isfile(os.path.join(build, "graph-ir", "graph.graphml"))
     assert os.path.isfile(os.path.join(build, "graph-ir", "graph.mmd"))
+
+
+def test_embeddings_fallback_to_ollama(tmp_path, monkeypatch):
+    """When /v1/embeddings is unsupported, fall back to Ollama native API."""
+    import http.server, socketserver, threading
+
+    # A chat server stub that rejects embeddings with 501.
+    class Chat(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(501)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"error":{"code":501,"message":"no embeddings"}}')
+
+        def log_message(self, *a):
+            pass
+
+    # An Ollama stub returning a fixed embedding vector.
+    class Ollama(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"embedding":[0.1,0.2,0.3]}')
+
+        def log_message(self, *a):
+            pass
+
+    chat = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Chat)
+    oll = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Ollama)
+    chat.allow_reuse_address = True
+    oll.allow_reuse_address = True
+    cport = chat.server_address[1]
+    oport = oll.server_address[1]
+    t1 = threading.Thread(target=chat.serve_forever, daemon=True)
+    t2 = threading.Thread(target=oll.serve_forever, daemon=True)
+    t1.start(); t2.start()
+
+    from compiler.core.inference import InferenceClient
+    client = InferenceClient(port=cport, host="127.0.0.1",
+                              ollama_host="127.0.0.1", ollama_port=oport,
+                              embedding_model="nomic-embed-text:latest")
+    vecs = client.embeddings(["a", "b"])
+    assert len(vecs) == 2
+    assert vecs[0] == [0.1, 0.2, 0.3]
+    chat.shutdown(); oll.shutdown()
+
+
+def test_incremental_cache_skips_unchanged(tmp_path, sample_corpus):
+    build = str(tmp_path / "build")
+    compiler = Compiler(PassRegistry(_passes_root()), build)
+    os.makedirs(os.path.join(build, "source"), exist_ok=True)
+    for fn in os.listdir(sample_corpus):
+        import shutil
+        shutil.copy(os.path.join(sample_corpus, fn),
+                    os.path.join(build, "source", fn))
+    # first run: parse executes
+    r1 = compiler.run(dry_run=False)
+    parsed = [x for x in r1["records"] if x["pass_id"] == "pass-01-parse"][0]
+    assert parsed["status"] == "ok"
+    # second run with incremental: parse is cached (inputs unchanged)
+    r2 = compiler.run(dry_run=False, incremental=True)
+    parsed2 = [x for x in r2["records"] if x["pass_id"] == "pass-01-parse"][0]
+    assert parsed2["status"] == "cached"
+
+
+def test_only_flag_runs_single_pass(tmp_path, sample_corpus):
+    build = str(tmp_path / "build")
+    # seed markdown-ir so pass-02 has its input
+    store = ArtifactStore(build)
+    store.write("markdown-ir", {"documents": [{"id": "d1"}]}, pass_id="pass-01-parse")
+    compiler = Compiler(PassRegistry(_passes_root()), build)
+    r = compiler.run(only="pass-02-extract", local=False)
+    assert [s["pass_id"] for s in r["plan"]["steps"]] == ["pass-02-extract"]
+    # without --local a model pass is skipped (no server)
+    assert r["records"][0]["status"] == "skipped"
+
+
+def test_pass10_generates_nextjs_app(tmp_path):
+    """pass-10 writes a deployable Next.js scaffold from the Application IR."""
+    import importlib.util, shutil
+
+    build = str(tmp_path)
+    store = ArtifactStore(build)
+    store.write("application-ir", {
+        "architecture": {"layers": ["ui"], "rationale": "single page"},
+        "pages": [{"id": "p1", "title": "Home", "route": "/",
+                   "components": ["cmp1"]}],
+        "components": [{"id": "cmp1", "name": "graph view",
+                        "responsibility": "show graph"}],
+        "routes": [{"path": "/", "page_id": "p1", "method": "GET"}],
+        "apis": [{"path": "/api/k", "method": "GET", "purpose": "serve"}],
+        "deployment_plan": {"target": "static", "steps": ["build"],
+                             "prerequisites": ["node"]},
+    }, pass_id="pass-09-specifications", schema_id="application-ir")
+
+    spec = importlib.util.spec_from_file_location(
+        "p10", os.path.join(_passes_root(), "pass-10-software", "run.py"))
+    p10 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(p10)
+    rc = p10.main([build])
+    assert rc == 0
+    app = os.path.join(build, "app")
+    assert os.path.isfile(os.path.join(app, "package.json"))
+    assert os.path.isfile(os.path.join(app, "app", "app", "index", "page.tsx"))
+    assert os.path.isfile(os.path.join(app, "components", "GraphView.tsx"))
+    assert os.path.isfile(os.path.join(app, "app", "app", "api", "api_k", "route.ts"))
+    assert os.path.isfile(os.path.join(app, "README.md"))
+
+
+def _passes_root():
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "compiler", "passes")
+
+
+def test_ontology_normalizes_vocab(tmp_path):
+    """repair_fn normalizes PART_OF -> part-of and drops unknown types."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "p03b", os.path.join(_passes_root(), "pass-03-ontology", "run.py"))
+    p03 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(p03)
+    from compiler.core.diagnostics import DiagnosticEmitter
+
+    build = str(tmp_path)
+    os.makedirs(os.path.join(build, "ontology-ir"), exist_ok=True)
+    data = {
+        "concepts": [{"id": "c1", "label": "A"}, {"id": "c2", "label": "B"}],
+        "relationships": [
+            {"id": "r1", "source": "c1", "target": "c2", "type": "PART_OF"},
+            {"id": "r2", "source": "c1", "target": "c2", "type": "WAT"},
+        ],
+        "hierarchies": [], "aliases": [],
+    }
+    emitter = DiagnosticEmitter("ontology-ir", build)
+    out = p03.repair(data, {}, emitter)
+    types = [r["type"] for r in out["relationships"]]
+    assert "part-of" in types
+    assert "WAT" not in types
+    diag = emitter.dump()
+    assert any(d["code"] == "VOCAB" for d in diag["diagnostics"])
+
+
+def test_reasoning_seeds_when_empty(tmp_path):
+    import importlib.util
+    from compiler.core.diagnostics import DiagnosticEmitter
+
+    spec = importlib.util.spec_from_file_location(
+        "p08b", os.path.join(_passes_root(), "pass-08-reasoning", "run.py"))
+    p08 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(p08)
+    build = str(tmp_path)
+    data = {"observations": [], "hypotheses": [], "contradictions": [], "questions": []}
+    emitter = DiagnosticEmitter("reasoning-ir", build)
+    out = p08.repair(data, {"graph-ir": {"nodes": [{"id": "n1", "label": "X", "concept_ref": "c1"}]}}, emitter)
+    assert len(out["observations"]) >= 1
+    assert any(d["code"] == "MISSING_EVIDENCE" for d in emitter.dump()["diagnostics"])
+
+
+def test_spec_backfills_when_empty(tmp_path):
+    import importlib.util
+    from compiler.core.diagnostics import DiagnosticEmitter
+
+    spec = importlib.util.spec_from_file_location(
+        "p09b", os.path.join(_passes_root(), "pass-09-specifications", "run.py"))
+    p09 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(p09)
+    build = str(tmp_path)
+    data = {}
+    emitter = DiagnosticEmitter("application-ir", build)
+    out = p09.repair(data, {"graph-ir": {"nodes": [{"id": "n1", "label": "Home", "concept_ref": "c1"}]},
+                              "semantic-ir": {"themes": [{"id": "t1", "label": "T"}]}}, emitter)
+    for key in ("architecture", "pages", "components", "routes", "apis", "deployment_plan"):
+        assert key in out and out[key], key
+    # should be schema-valid via the validation helper
+    from compiler.core import ArtifactStore
+    store = ArtifactStore(build)
+    store.write("application-ir", out, pass_id="test", schema_id="application-ir")
+    assert store.validate("application-ir", "application-ir") == []
+
+
 
