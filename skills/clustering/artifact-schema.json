@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill-clustering",
+  "title": "Semantic Clustering skill artifact",
+  "type": "object",
+  "properties": {
+    "skill": {
+      "type": "string",
+      "const": "clustering"
+    },
+    "produces": {
+      "type": "string",
+      "const": "semantic-ir"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

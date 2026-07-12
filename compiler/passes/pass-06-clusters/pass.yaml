@@ -1,0 +1,11 @@
+id: pass-06-clusters
+name: Semantic Clustering
+produces: semantic-ir
+consumes: [semantic-ir, graph-ir]
+downstream: [semantic-ir]
+entrypoint: run.py
+deterministic: false
+model_required: true
+description: >
+  Cluster embedded nodes into themes and label each cluster. Extends the
+  Semantic IR with clusters, themes, and per-theme node membership.

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill-entity-extraction",
+  "title": "Entity Extraction skill artifact",
+  "type": "object",
+  "properties": {
+    "skill": {
+      "type": "string",
+      "const": "entity-extraction"
+    },
+    "produces": {
+      "type": "string",
+      "const": "entity-ir"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill-code-generation",
+  "title": "Code Generation skill artifact",
+  "type": "object",
+  "properties": {
+    "skill": {
+      "type": "string",
+      "const": "code-generation"
+    },
+    "produces": {
+      "type": "string",
+      "const": "source"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill-deployment",
+  "title": "Deployment Planning skill artifact",
+  "type": "object",
+  "properties": {
+    "skill": {
+      "type": "string",
+      "const": "deployment"
+    },
+    "produces": {
+      "type": "string",
+      "const": "application-ir"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill-evaluation",
+  "title": "Pass Evaluation skill artifact",
+  "type": "object",
+  "properties": {
+    "skill": {
+      "type": "string",
+      "const": "evaluation"
+    },
+    "produces": {
+      "type": "string",
+      "const": "evaluation.json"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

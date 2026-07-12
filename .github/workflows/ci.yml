@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install pyyaml jsonschema pytest
+      - name: Run tests
+        run: pytest -q
+      - name: Build example & validate artifacts
+        run: |
+          python examples/build_example.py
+          python scripts/validate_artifacts.py examples/build

@@ -1,0 +1,12 @@
+id: pass-05-embeddings
+name: Embedding Generation
+produces: semantic-ir
+consumes: [graph-ir]
+downstream: [semantic-ir]
+entrypoint: run.py
+deterministic: false
+model_required: true
+description: >
+  Embed nodes (and optionally edges) of the Knowledge Graph into a vector
+  space. Produces the embedding table that powers clustering and semantic
+  search. Backend-agnostic: any local embedding model may be plugged in.

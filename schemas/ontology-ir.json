@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ontology-ir",
+  "title": "Ontology IR",
+  "type": "object",
+  "required": [
+    "concepts",
+    "relationships",
+    "hierarchies",
+    "aliases"
+  ],
+  "properties": {
+    "concepts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "member_entity_ids"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "member_entity_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "definition": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "target",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "implements",
+              "depends-on",
+              "specializes",
+              "contradicts",
+              "enables",
+              "references",
+              "part-of"
+            ]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    "hierarchies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "parent",
+          "child",
+          "type"
+        ],
+        "properties": {
+          "parent": {
+            "type": "string"
+          },
+          "child": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "is-a",
+              "part-of"
+            ]
+          }
+        }
+      }
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "concept_id",
+          "alias"
+        ],
+        "properties": {
+          "concept_id": {
+            "type": "string"
+          },
+          "alias": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

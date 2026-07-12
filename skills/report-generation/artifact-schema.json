@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill-report-generation",
+  "title": "Report Generation skill artifact",
+  "type": "object",
+  "properties": {
+    "skill": {
+      "type": "string",
+      "const": "report-generation"
+    },
+    "produces": {
+      "type": "string",
+      "const": "markdown"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

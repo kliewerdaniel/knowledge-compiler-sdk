@@ -1,0 +1,12 @@
+id: pass-08-reasoning
+name: Reasoning & Analysis
+produces: reasoning-ir
+consumes: [semantic-ir, graph-ir]
+downstream: [reasoning-ir]
+entrypoint: run.py
+deterministic: false
+model_required: true
+description: >
+  Perform contradiction detection, gap (missing-information) analysis, and
+  hypothesis generation. Produces the Reasoning IR: observations, hypotheses,
+  contradictions, unanswered questions, each with confidence and provenance.

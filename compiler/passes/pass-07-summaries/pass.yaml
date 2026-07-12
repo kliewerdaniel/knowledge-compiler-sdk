@@ -1,0 +1,11 @@
+id: pass-07-summaries
+name: Summary & Theme Generation
+produces: semantic-ir
+consumes: [semantic-ir, graph-ir, markdown-ir]
+downstream: [reasoning-ir]
+entrypoint: run.py
+deterministic: false
+model_required: true
+description: >
+  Produce a natural-language summary per theme and a global executive summary.
+  Summaries stay grounded in source spans via provenance links.

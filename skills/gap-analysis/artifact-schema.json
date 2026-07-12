@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill-gap-analysis",
+  "title": "Missing Information Detection skill artifact",
+  "type": "object",
+  "properties": {
+    "skill": {
+      "type": "string",
+      "const": "gap-analysis"
+    },
+    "produces": {
+      "type": "string",
+      "const": "reasoning-ir"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

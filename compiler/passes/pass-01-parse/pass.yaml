@@ -1,0 +1,12 @@
+id: pass-01-parse
+name: Markdown Parsing
+produces: markdown-ir
+consumes: []
+downstream: [ontology-ir, graph-ir]
+entrypoint: run.py
+deterministic: true
+model_required: false
+description: >
+  Parse raw Markdown source into a Markdown Intermediate Representation:
+  structured documents, section hierarchy, inline citations (links/refs), and
+  a document graph recording which documents reference which others.

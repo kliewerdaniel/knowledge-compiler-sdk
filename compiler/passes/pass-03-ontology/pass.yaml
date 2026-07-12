@@ -1,0 +1,12 @@
+id: pass-03-ontology
+name: Ontology Building
+produces: ontology-ir
+consumes: [entity-ir]
+downstream: [graph-ir]
+entrypoint: run.py
+deterministic: false
+model_required: true
+description: >
+  Cluster extracted entities into concepts, identify relationships and
+  hierarchies, and record aliases. The Ontology IR is the typed backbone the
+  knowledge graph is built from.

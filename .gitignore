@@ -1,0 +1,8 @@
+# Build artifacts (generated; inspectable but usually not committed)
+build/
+examples/build/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

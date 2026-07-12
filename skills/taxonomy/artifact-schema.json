@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill-taxonomy",
+  "title": "Taxonomy Construction skill artifact",
+  "type": "object",
+  "properties": {
+    "skill": {
+      "type": "string",
+      "const": "taxonomy"
+    },
+    "produces": {
+      "type": "string",
+      "const": "ontology-ir"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

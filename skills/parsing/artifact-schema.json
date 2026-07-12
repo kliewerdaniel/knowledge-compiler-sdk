@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill-parsing",
+  "title": "Markdown Parsing skill artifact",
+  "type": "object",
+  "properties": {
+    "skill": {
+      "type": "string",
+      "const": "parsing"
+    },
+    "produces": {
+      "type": "string",
+      "const": "markdown-ir"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

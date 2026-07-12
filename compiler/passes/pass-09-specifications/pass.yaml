@@ -1,0 +1,11 @@
+id: pass-09-specifications
+name: Specification Generation
+produces: application-ir
+consumes: [reasoning-ir, semantic-ir, graph-ir]
+downstream: [application-ir]
+entrypoint: run.py
+deterministic: false
+model_required: true
+description: >
+  Translate the reasoned knowledge into a software specification: requirements,
+  data model, and user-facing capabilities. First stage of the Application IR.

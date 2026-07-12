@@ -1,0 +1,11 @@
+id: pass-04-graph
+name: Knowledge Graph Construction
+produces: graph-ir
+consumes: [ontology-ir, markdown-ir]
+downstream: [semantic-ir]
+entrypoint: run.py
+deterministic: false
+model_required: true
+description: >
+  Materialise the ontology into a Knowledge Graph IR: nodes, typed edges,
+  per-edge confidence, and full provenance back to source spans.

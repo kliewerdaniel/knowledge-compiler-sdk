@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill-contradiction-analysis",
+  "title": "Contradiction Detection skill artifact",
+  "type": "object",
+  "properties": {
+    "skill": {
+      "type": "string",
+      "const": "contradiction-analysis"
+    },
+    "produces": {
+      "type": "string",
+      "const": "reasoning-ir"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

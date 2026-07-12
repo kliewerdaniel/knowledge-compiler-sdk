@@ -1,0 +1,6 @@
+# Dependencies for the core engine (kept minimal on purpose).
+pyyaml
+jsonschema
+
+# Test/CI
+pytest

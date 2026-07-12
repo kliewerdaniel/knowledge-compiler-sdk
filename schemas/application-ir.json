@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "application-ir",
+  "title": "Application IR",
+  "type": "object",
+  "required": [
+    "architecture",
+    "pages",
+    "components",
+    "routes",
+    "apis",
+    "deployment_plan"
+  ],
+  "properties": {
+    "architecture": {
+      "type": "object",
+      "required": [
+        "layers"
+      ],
+      "properties": {
+        "layers": {
+          "type": "array"
+        },
+        "rationale": {
+          "type": "string"
+        }
+      }
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "route"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "route": {
+            "type": "string"
+          },
+          "components": {
+            "type": "array"
+          },
+          "theme_ref": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "props": {
+            "type": "array"
+          },
+          "responsibility": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "page_id"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "apis": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "method"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "request": {
+            "type": "object"
+          },
+          "response": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "deployment_plan": {
+      "type": "object",
+      "required": [
+        "target",
+        "steps"
+      ],
+      "properties": {
+        "target": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array"
+        },
+        "prerequisites": {
+          "type": "array"
+        }
+      }
+    }
+  }
+}

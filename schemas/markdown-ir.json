@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "markdown-ir",
+  "title": "Markdown IR",
+  "type": "object",
+  "required": [
+    "documents",
+    "citations",
+    "document_graph",
+    "metadata"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "documents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "path",
+          "sections",
+          "word_count"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "preamble": {
+            "type": "string"
+          },
+          "section_count": {
+            "type": "integer"
+          },
+          "word_count": {
+            "type": "integer"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "level",
+                "title",
+                "blocks"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "level": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6
+                },
+                "number": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "blocks": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "doc",
+          "text",
+          "target"
+        ],
+        "properties": {
+          "doc": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "document_graph": {
+      "type": "object",
+      "required": [
+        "nodes",
+        "edges"
+      ],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "from",
+              "to",
+              "kind"
+            ],
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

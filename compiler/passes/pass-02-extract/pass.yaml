@@ -1,0 +1,12 @@
+id: pass-02-extract
+name: Entity Extraction
+produces: entity-ir
+consumes: [markdown-ir]
+downstream: [ontology-ir, graph-ir]
+entrypoint: run.py
+deterministic: false
+model_required: true
+description: >
+  Extract entities, technical terms, and surface-level claims from each
+  document in the Markdown IR. Entities carry candidate types and the source
+  span they derive from, so every downstream artifact is traceable.

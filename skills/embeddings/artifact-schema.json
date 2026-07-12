@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill-embeddings",
+  "title": "Embedding Generation skill artifact",
+  "type": "object",
+  "properties": {
+    "skill": {
+      "type": "string",
+      "const": "embeddings"
+    },
+    "produces": {
+      "type": "string",
+      "const": "semantic-ir"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}
