@@ -128,9 +128,18 @@ The deterministic parse runs first; each model pass calls your server, validates
 the JSON against its schema, enforces internal reference consistency (dropping
 dangling graph edges, flagging weak ontologies, annotating cycles), and writes
 the artifact. The final pass (`pass-10-software`) turns the `application-ir`
-into a **deployable Next.js scaffold** under `build/app/` (pages, components,
-API routes, `package.json`, a deployment README). Incremental mode reuses any
-artifact whose inputs are unchanged, so re-runs are cheap.
+into a **runnable Next.js application** under `build/knowledge-app/`:
+
+- `data/*.json` — the compiled IRs, copied in so the app is self-contained
+- `knowledge-app/app/api/*/route.ts` — real route handlers that read `data/` and return
+  the artifacts as JSON (no external services needed)
+- `knowledge-app/components/KnowledgeGraphVisualizer.tsx` — an SVG knowledge-graph view
+  (zero extra deps) that fetches `/api/graph`
+- `knowledge-app/app/<route>/page.tsx` — one page per declared route
+- `package.json`, `next.config.mjs`, `tsconfig.json`, `README.md`
+
+Run it with `cd build/knowledge-app && npm install && npm run dev`. Incremental mode
+reuses any artifact whose inputs are unchanged, so re-runs are cheap.
 
 ## The pass registry (the extensibility model)
 

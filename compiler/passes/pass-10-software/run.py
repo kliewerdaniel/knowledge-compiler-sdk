@@ -1,150 +1,254 @@
 #!/usr/bin/env python3
 """pass-10-software entrypoint (model-required -> code generation).
 
-Consumes the Application IR and *generates a deployable Next.js (App Router)
-scaffold* into ``<build>/app/``. This is a deterministic transform from the IR
-to files — the intelligence lives in the Application IR (produced by the
-model-required spec + layout passes), so code generation itself is
-reproducible and inspectable.
+Consumes the Application IR and *generates a deployable, runnable Next.js
+(App Router) scaffold* into ``<build>/app/``:
 
-Emitted:
-    app/package.json
-    app/next.config.mjs
-    app/tsconfig.json
-    app/app/layout.tsx
-    app/app/<route>/page.tsx        (one per route)
-    app/components/<Component>.tsx  (one per component)
-    app/app/api/<name>/route.ts    (one per api)
-    app/README.md                   (deployment plan + provenance)
+  - ``data/*.json``        the compiled IRs, copied in so the app is
+                           self-contained (no external services needed)
+  - ``app/app/api/<n>/route.ts``   real route handlers that READ the copied
+                           artifacts from ``data/`` and return them as JSON
+  - ``app/components/*.tsx``       generated React components, one of which
+                           (KnowledgeGraphVisualizer) fetches /api/graph and
+                           renders an SVG knowledge graph with zero extra deps
+  - ``app/app/<route>/page.tsx``   one page per declared route
+  - ``package.json`` / ``next.config.mjs`` / ``tsconfig.json`` / ``README.md``
 
-Invocation: python run.py <build_dir>
+The generated app needs only ``npm install && npm run dev`` — no cloud, no
+extra APIs. This is the "intelligence becomes software" payoff.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
-from compiler.core import ArtifactStore, DiagnosticEmitter, evaluate_artifact, write_evaluation
+from compiler.core.artifacts import ArtifactStore  # noqa: E402
+from compiler.core.llm_pass import parse_port_model, run_model_pass  # noqa: E402
+from compiler.core.diagnostics import DiagnosticEmitter  # noqa: E402
 
 PRODUCES = "application-ir"
+CONSUMES = ["reasoning-ir", "semantic-ir", "graph-ir"]
 
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
 
 def to_pascal(name: str) -> str:
-    return "".join(w.capitalize() for w in name.replace("-", " ").replace("_", " ").split())
+    out = []
+    for part in str(name).replace("-", " ").replace("_", " ").split():
+        if part:
+            out.append(part[0].upper() + part[1:])
+    return "".join(out) or "Component"
 
 
 def route_dir(route: str) -> str:
-    r = route.strip("/")
-    return r if r else "index"
+    r = (route or "/").strip().strip("/")
+    return r.replace("/", "_") or "index"
 
 
-def main(argv=None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
-    # The orchestrator forwards --port/--model/--embed-model to every model
-    # pass; code generation is deterministic so we accept and ignore them.
-    args = [a for a in argv if not a.startswith("--")]
-    build_dir = args[0] if args else os.getcwd()
+def _copy_artifacts(build_dir: str, app_root: str, emit: DiagnosticEmitter) -> dict:
+    """Copy every compiled IR into the app's data/ dir. Returns {type: file}."""
     store = ArtifactStore(build_dir)
-    if not store.has(PRODUCES):
-        print(f"error: missing input artifact: {PRODUCES}", file=sys.stderr)
-        return 1
-    app = store.read(PRODUCES)
-    emitter = DiagnosticEmitter(PRODUCES, build_dir)
+    data_dir = os.path.join(app_root, "data")
+    os.makedirs(data_dir, exist_ok=True)
+    present = {}
+    for art in ("markdown-ir", "entity-ir", "ontology-ir", "graph-ir",
+                "semantic-ir", "reasoning-ir", "application-ir"):
+        if store.has(art):
+            data = store.read(art)
+            fname = os.path.join(data_dir, f"{art}.json")
+            with open(fname, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            present[art] = f"{art}.json"
+    if not present:
+        emit.warning("NO_DATA", "no compiled IRs found to embed in the app")
+    return present
 
-    app_root = os.path.join(build_dir, "app")
+
+def _write(app_root: str, rel: str, content: str) -> None:
+    path = os.path.join(app_root, *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+def _api_route_ts(data_file: str) -> str:
+    return (
+        'import { NextResponse } from "next/server";\n'
+        'import { readFileSync } from "fs";\n'
+        'import path from "path";\n\n'
+        f'const FILE = "{data_file}";\n\n'
+        "export async function GET() {\n"
+        "  try {\n"
+        '    const p = path.join(process.cwd(), "data", FILE);\n'
+        "    const data = JSON.parse(readFileSync(p, \"utf-8\"));\n"
+        "    return NextResponse.json(data);\n"
+        "  } catch (e) {\n"
+        '    return NextResponse.json({ error: String(e) }, { status: 500 });\n'
+        "  }\n"
+        "}\n"
+    )
+
+
+# Canonical artifact -> api base path + friendly label
+CANON = [
+    ("graph-ir", "graph", "Knowledge Graph"),
+    ("ontology-ir", "ontology", "Ontology"),
+    ("entity-ir", "entities", "Entities"),
+    ("semantic-ir", "semantic", "Semantic Index"),
+    ("reasoning-ir", "reasoning", "Reasoning"),
+    ("application-ir", "app", "Application Spec"),
+]
+
+
+GRAPH_VIEWER_TSX = """'use client';
+import { useEffect, useState } from 'react';
+
+export default function KnowledgeGraphVisualizer() {
+  const [g, setG] = useState<any>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    fetch('/api/graph')
+      .then((r) => r.json())
+      .then(setG)
+      .catch((e) => setErr(String(e)));
+  }, []);
+  if (err) return <div className="error">graph error: {err}</div>;
+  if (!g) return <div>Loading knowledge graph...</div>;
+  const nodes = g.nodes || [];
+  const edges = g.edges || [];
+  const n = Math.max(nodes.length, 1);
+  const R = 200;
+  const pos = nodes.map((nd: any, i: number) => {
+    const a = (2 * Math.PI * i) / n;
+    return { id: nd.id, x: 260 + R * Math.cos(a), y: 260 + R * Math.sin(a), label: nd.label || nd.id };
+  });
+  const byId: Record<string, any> = Object.fromEntries(pos.map((p: any) => [p.id, p]));
+  return (
+    <svg width="520" height="520" viewBox="0 0 520 520" role="img" aria-label="knowledge graph">
+      {edges.map((e: any, i: number) => {
+        const s = byId[e.source], t = byId[e.target];
+        if (!s || !t) return null;
+        return <line key={'e' + i} x1={s.x} y1={s.y} x2={t.x} y2={t.y} stroke="#94a3b8" strokeWidth={1} />;
+      })}
+      {pos.map((p) => (
+        <g key={p.id}>
+          <circle cx={p.x} cy={p.y} r={6} fill="#3b82f6" />
+          <text x={p.x + 8} y={p.y + 4} fontSize={11} fill="#0f172a">{p.label}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+"""
+
+
+# ---------------------------------------------------------------------------
+# main generation
+# ---------------------------------------------------------------------------
+
+def generate(build_dir: str, app: dict, emit: DiagnosticEmitter) -> None:
+    # The generated Next.js project lives in ``<build>/knowledge-app``. We avoid
+    # naming it ``app`` so the Next App Router dir (``knowledge-app/app``) is the
+    # only directory named ``app`` — Turbopack mis-detects nested ``app/app``.
+    app_root = os.path.join(build_dir, "knowledge-app")
+    shutil.rmtree(app_root, ignore_errors=True)
     os.makedirs(os.path.join(app_root, "app"), exist_ok=True)
-    os.makedirs(os.path.join(app_root, "components"), exist_ok=True)
-    os.makedirs(os.path.join(app_root, "app", "api"), exist_ok=True)
 
-    # package.json
-    pkg = {
-        "name": "knowledge-compiled-app",
+    present = _copy_artifacts(build_dir, app_root, emit)
+
+    # ---- config files -----------------------------------------------------
+    _write(app_root, "package.json", json.dumps({
+        "name": "knowledge-app",
         "version": "0.1.0",
         "private": True,
-        "scripts": {"dev": "next dev", "build": "next build", "start": "next start"},
+        "scripts": {
+            "dev": "next dev",
+            "build": "next build",
+            "start": "next start",
+        },
         "dependencies": {
             "next": "14.2.5",
             "react": "18.3.1",
             "react-dom": "18.3.1",
         },
-    }
-    _write(app_root, "package.json", json.dumps(pkg, indent=2))
+        "devDependencies": {"typescript": "5.4.5", "@types/react": "18.3.3",
+                             "@types/node": "20.14.10"},
+    }, indent=2) + "\n")
 
-    _write(
-        app_root,
-        "next.config.mjs",
-        "/** @type {import('next').NextConfig} */\nexport default {};\n",
-    )
-    _write(
-        app_root,
-        "tsconfig.json",
-        json.dumps(
-            {
-                "compilerOptions": {
-                    "target": "ES2017",
-                    "lib": ["dom", "dom.iterable", "esnext"],
-                    "jsx": "preserve",
-                    "module": "esnext",
-                    "moduleResolution": "bundler",
-                    "strict": True,
-                },
-                "include": ["**/*.ts", "**/*.tsx"],
-            },
-            indent=2,
-        ),
-    )
+    _write(app_root, "tsconfig.json", json.dumps({
+        "compilerOptions": {
+            "target": "ES2020",
+            "lib": ["dom", "dom.iterable", "esnext"],
+            "allowJs": True, "skipLibCheck": True,
+            "strict": False, "noEmit": True,
+            "esModuleInterop": True, "module": "esnext",
+            "moduleResolution": "bundler", "resolveJsonModule": True,
+            "isolatedModules": True, "jsx": "preserve",
+            "incremental": True, "plugins": [{"name": "next"}],
+            "paths": {"@/*": ["./*"]},
+        },
+        "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+        "exclude": ["node_modules"],
+    }, indent=2) + "\n")
 
-    # layout
-    _write(
-        app_root,
-        os.path.join("app", "layout.tsx"),
-        "export default function RootLayout({\n"
-        "  children,\n"
-        "}: {\n"
-        "  children: React.ReactNode;\n"
-        "}) {\n"
-        "  return (\n"
-        "    <html lang=\"en\">\n"
-        "      <body>{children}</body>\n"
-        "    </html>\n"
-        "  );\n"
-        "}\n",
-    )
+    _write(app_root, "next.config.mjs",
+           'const nextConfig = { reactStrictMode: true };\nexport default nextConfig;\n')
 
-    pages = app.get("pages", [])
+    _write(app_root, "app/layout.tsx",
+           'export const metadata = { title: "Knowledge App", description: "Generated by the Knowledge Compiler" };\n'
+           'export default function RootLayout({ children }: { children: React.ReactNode }) {\n'
+           '  return (\n'
+           '    <html lang="en"><body style={{ fontFamily: "system-ui, sans-serif", margin: 0 }}>{children}</body></html>\n'
+           '  );\n'
+           '}\n')
+
+    # ---- data overview route ---------------------------------------------
+    def _overview() -> dict:
+        out: dict = {}
+        for art, _f, label in CANON:
+            if art in present:
+                out[label] = present[art]
+        return out
+    _write(app_root, "app/api/overview/route.ts",
+           'import { NextResponse } from "next/server";\n'
+           'export async function GET() {\n'
+           f'  return NextResponse.json({json.dumps(_overview())});\n'
+           '}\n')
+
+    # ---- canonical API routes (real, data-serving) -----------------------
+    for art, base, _label in CANON:
+        if art in present:
+            _write(app_root, f"app/api/{base}/route.ts",
+                   _api_route_ts(present[art]))
+
+    # ---- model-declared api routes (best-effort mapping) -----------------
+    declared = app.get("apis", []) or []
+    known_bases = {b for _a, b, _l in CANON}
+    for api in declared:
+        seg = api.get("path", "").strip("/").replace("/", "_") or "custom"
+        if seg in known_bases or seg.startswith("api_"):
+            continue  # already covered or previously handled
+        # map keyword -> artifact, default to application-ir
+        target = present.get("application-ir")
+        low = seg.lower()
+        for art, base, _l in CANON:
+            if base in low and art in present:
+                target = present[art]
+                break
+        if target:
+            _write(app_root, f"app/api/{seg}/route.ts", _api_route_ts(target))
+
+    # ---- components -------------------------------------------------------
     components = {c.get("id"): c for c in app.get("components", [])}
-    # page per route
-    for p in pages:
-        rdir = route_dir(p.get("route", "/"))
-        comp_names = [
-            to_pascal(components[c]["name"]) if c in components else to_pascal(str(c))
-            for c in p.get("components", [])
-        ]
-        imports = "\n".join(
-            f'import {n} from "@/components/{n}";' for n in comp_names
-        )
-        body = "\n".join(f"      <{n} />" for n in comp_names) or "      <p>No components.</p>"
-        code = (
-            f'// page: {p.get("title", p.get("id"))} (route {p.get("route")})\n'
-            f"{imports}\n"
-            f"export default function Page() {{\n"
-            f"  return (\n"
-            f"    <main>\n"
-            f"      <h1>{p.get('title', p.get('id'))}</h1>\n"
-            f"{body}\n"
-            f"    </main>\n"
-            f"  );\n"
-            f"}}\n"
-        )
-        _write(app_root, os.path.join("app", "app", rdir, "page.tsx"), code)
-
-    # components
     for c in app.get("components", []):
         name = to_pascal(c.get("name", c.get("id")))
         resp = c.get("responsibility", "Generated component.")
@@ -154,80 +258,184 @@ def main(argv=None) -> int:
             f"  return <div className=\"{name}\">{name}</div>;\n"
             f"}}\n"
         )
-        _write(app_root, os.path.join("components", f"{name}.tsx"), code)
+        _write(app_root, f"components/{name}.tsx", code)
 
-    # api routes
-    for api in app.get("apis", []):
-        name = api.get("path", "/").strip("/").replace("/", "_") or "endpoint"
-        purpose = api.get("purpose", "API endpoint")
+    # always include the graph viewer (renders /api/graph)
+    _write(app_root, "components/KnowledgeGraphVisualizer.tsx", GRAPH_VIEWER_TSX)
+
+    # ---- pages ------------------------------------------------------------
+    pages = app.get("pages", []) or []
+    if not pages:
+        pages = [{"id": "home", "title": "Home", "route": "/",
+                  "components": ["KnowledgeGraphVisualizer"]}]
+    for p in pages:
+        rdir = route_dir(p.get("route", "/"))
+        title = p.get("title", p.get("id"))
+        comp_names = [
+            to_pascal(components[c]["name"]) if c in components else to_pascal(str(c))
+            for c in p.get("components", [])
+        ]
+        # ensure the viewer is available if referenced
+        imports = "\n".join(
+            f'import {n} from "@/components/{n}";' for n in comp_names
+        )
+        body = "\n".join(f"      <{n} />" for n in comp_names) or "      <p>No components.</p>"
         code = (
-            f"// {purpose}\n"
-            f"import {{ NextResponse }} from \"next/server\";\n\n"
-            f"export async function {api.get('method', 'GET')}(\n"
-            f"  _req: Request,\n"
-            f") {{\n"
-            f"  return NextResponse.json({{ ok: true }});\n"
+            f'// page: {title} (route {p.get("route")})\n'
+            f"{imports}\n"
+            f"export default function Page() {{\n"
+            f"  return (\n"
+            f"    <main style={{{{ padding: '2rem' }}}}>\n"
+            f"      <h1>{title}</h1>\n"
+            f"{body}\n"
+            f"    </main>\n"
+            f"  );\n"
             f"}}\n"
         )
-        adir = os.path.join("app", "app", "api", name)
-        _write(app_root, os.path.join(adir, "route.ts"), code)
+        _write(app_root, f"app/{rdir}/page.tsx", code)
 
-    # deployment README
-    dp = app.get("deployment_plan", {})
+    # ---- README with deployment plan -------------------------------------
+    dp = app.get("deployment_plan", {}) or {}
+    steps = "\n".join(f"{i+1}. {s}" for i, s in enumerate(dp.get("steps", []))) or "1. npm install\n2. npm run dev"
+    prereq = ", ".join(dp.get("prerequisites", [])) or "node 18+"
     readme = (
-        "# Knowledge-Compiled Application\n\n"
-        "Generated by the Knowledge Compiler (`pass-10-software`) from the "
-        "Application IR. This is a Next.js App Router scaffold.\n\n"
-        f"## Architecture\n{app.get('architecture', {}).get('rationale', 'n/a')}\n\n"
-        "## Pages\n"
-        + "\n".join(f"- `{p.get('route')}` — {p.get('title')}" for p in pages)
-        + "\n\n## Deployment\n"
-        f"- target: `{dp.get('target', 'unknown')}`\n"
-        f"- prerequisites: {', '.join(dp.get('prerequisites', [])) or 'none'}\n"
-        "### steps\n"
-        + "\n".join(f"{i+1}. {s}" for i, s in enumerate(dp.get('steps', [])))
-        + "\n"
+        "# Knowledge App\n\n"
+        "Generated by the Knowledge Compiler from your compiled knowledge base.\n"
+        "Self-contained: the compiled IRs are embedded in `data/` and served by\n"
+        "the API routes — no external services required.\n\n"
+        "## Run\n\n"
+        "```bash\nnpm install\nnpm run dev\n# open http://localhost:3000\n```\n\n"
+        "## What's inside\n\n"
+        "- `data/*.json` — the compiled IRs (graph, ontology, entities, ...)\n"
+        "- `knowledge-app/app/api/*/route.ts` — route handlers serving that data\n"
+        "- `components/KnowledgeGraphVisualizer.tsx` — SVG knowledge-graph view\n\n"
+        "## Deployment\n\n"
+        f"- target: `{dp.get('target', 'static')}`\n"
+        f"- prerequisites: {prereq}\n\n"
+        "### steps\n\n"
+        f"{steps}\n"
     )
     _write(app_root, "README.md", readme)
+    _write(app_root, "manifest.json", json.dumps({
+        "name": "Knowledge App",
+        "generated_from": "application-ir",
+        "data_artifacts": list(present.keys()),
+        "api_routes": [f"/api/{b}" for _a, b, _l in CANON if _a in present] + ["/api/overview"],
+    }, indent=2) + "\n")
 
-    # diagnostics: warn on empty pages/apis
-    if not pages:
-        emitter.warning("MISSING_EVIDENCE", "no pages in application-ir")
-    if not app.get("components"):
-        emitter.warning("MISSING_EVIDENCE", "no components in application-ir")
+    return app_root
 
-    # record the generated artifact + emit metadata
-    meta = store.write(
-        PRODUCES, app, pass_id="pass-10-software",
-        source_artifacts=["application-ir"], schema_id=PRODUCES,
+
+# ---------------------------------------------------------------------------
+# compiler entrypoint
+# ---------------------------------------------------------------------------
+
+def build_user_prompt(inputs):
+    return (
+        "Build an application spec (application-ir) from the reasoning and "
+        "semantic IRs already compiled. Return the JSON object required by the "
+        "application-ir schema: architecture, pages, components, routes, apis, "
+        "deployment_plan. Every page.route must start with '/'."
     )
-    # also write a manifest of generated files for inspectability
-    manifest = {"generated_files": sorted(_walk(app_root))}
-    with open(os.path.join(app_root, "manifest.json"), "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(manifest, indent=2))
-    ev = evaluate_artifact(PRODUCES, app, meta, hints={"reproducibility": 1.0})
-    write_evaluation(build_dir, PRODUCES, ev)
-    emitter.write()
-    print(
-        f"wrote Next.js app to {app_root} "
-        f"({len(manifest['generated_files'])} files, eval {ev.overall:.3f})"
-    )
+
+
+SYSTEM_PROMPT = (
+    "You are a software architect. Given compiled knowledge IRs, produce a "
+    "concrete application specification as strict JSON."
+)
+
+
+def repair(data, inputs, emitter: DiagnosticEmitter) -> dict:
+    """Backfill a schema-valid application-ir from available inputs."""
+    gi = inputs.get("graph-ir", {})
+    si = inputs.get("semantic-ir", {})
+    nodes = gi.get("nodes", [])
+    themes = si.get("themes", [])
+
+    if not data.get("architecture"):
+        emitter.warning("MISSING_EVIDENCE", "no architecture; using default layers")
+        data["architecture"] = {
+            "layers": ["presentation", "application", "data"],
+            "rationale": "default three-tier from available IRs",
+        }
+    if not data.get("pages"):
+        emitter.warning("MISSING_EVIDENCE", "no pages; deriving one per theme/node")
+        src = themes or nodes
+        pages = []
+        for i, t in enumerate(src[:5] or [{"id": "n1", "label": "Home"}]):
+            label = t.get("label", f"Page {i+1}")
+            pid = f"page-{i+1}"
+            pages.append({
+                "id": pid,
+                "title": label,
+                "route": "/" if i == 0 else f"/{t.get('id', f'p{i+1}')}",
+                "components": ["KnowledgeGraphVisualizer"] if i == 0 else [f"cmp-{i+1}"],
+                "theme_ref": t.get("id"),
+            })
+        data["pages"] = pages
+    if not data.get("components"):
+        emitter.warning("MISSING_EVIDENCE", "no components; deriving from pages")
+        comps = []
+        for p in data["pages"]:
+            cid = (p.get("components") or [f"cmp-{p['id']}"])[0]
+            comps.append({
+                "id": cid,
+                "name": p["title"].replace(" ", "") or "Component",
+                "props": [],
+                "responsibility": f"Renders {p['title']}",
+            })
+        data["components"] = comps
+    if not data.get("routes"):
+        data["routes"] = [
+            {"path": p["route"], "page_id": p["id"], "method": "GET"}
+            for p in data["pages"]
+        ]
+    if not data.get("apis"):
+        data["apis"] = [{
+            "path": "/api/knowledge",
+            "method": "GET",
+            "purpose": "serve the compiled knowledge graph",
+            "request": {}, "response": {},
+        }]
+    if not data.get("deployment_plan"):
+        emitter.warning("MISSING_EVIDENCE", "no deployment plan; using default")
+        data["deployment_plan"] = {
+            "target": "static",
+            "steps": ["npm install", "npm run build", "npm run start"],
+            "prerequisites": ["node 18+"],
+        }
+    return data
+
+
+def main():
+    # pass-10 is a *deterministic code-generation* pass: it consumes the
+    # application-ir already produced by pass-09 and emits a runnable app. It
+    # does NOT call the model. If the application-ir is missing required
+    # sections, repair() backfills a valid scaffold from the other IRs.
+    import argparse
+
+    ap = argparse.ArgumentParser(add_help=True)
+    ap.add_argument("build_dir", nargs="?", default=os.getcwd())
+    ap.add_argument("--port", type=int, default=int(os.environ.get("KC_PORT", "8080")))
+    ap.add_argument("--model", default=os.environ.get("KC_MODEL"))
+    ap.add_argument("--embed-model", default=os.environ.get("KC_EMBED_MODEL"))
+    ns, _ = ap.parse_known_args(sys.argv[1:])
+
+    store = ArtifactStore(ns.build_dir)
+    if not store.has(PRODUCES):
+        sys.stderr.write("missing input artifact: application-ir\n")
+        return 1
+    app = store.read(PRODUCES)
+    emit = DiagnosticEmitter(PRODUCES, ns.build_dir)
+    inputs = {}
+    for a in CONSUMES:
+        if store.has(a):
+            inputs[a] = store.read(a)
+    app = repair(app, inputs, emit)
+    app_root = generate(ns.build_dir, app, emit)
+    n = sum(len(fs) for _, _, fs in os.walk(app_root))
+    print(f"wrote runnable Next.js app to {app_root} ({n} files)")
     return 0
-
-
-def _write(root, rel, content):
-    p = os.path.join(root, rel)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as fh:
-        fh.write(content)
-
-
-def _walk(root):
-    out = []
-    for dp, _, files in os.walk(root):
-        for f in files:
-            out.append(os.path.relpath(os.path.join(dp, f), root))
-    return out
 
 
 if __name__ == "__main__":

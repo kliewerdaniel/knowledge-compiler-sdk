@@ -90,6 +90,15 @@ def repair(data, inputs, emitter: DiagnosticEmitter) -> dict:
                 "theme": nodes[0].get("id", "n1"),
                 "why_unanswered": "model produced no observations to build on",
             }]
+
+    # Normalize contradiction field names to the schema's a_claim / b_claim.
+    for c in data.get("contradictions", []):
+        if "a_claim" not in c and "a" in c:
+            c["a_claim"] = c.pop("a")
+        if "b_claim" not in c and "b" in c:
+            c["b_claim"] = c.pop("b")
+        c.setdefault("a_claim", c.get("a_claim", ""))
+        c.setdefault("b_claim", c.get("b_claim", ""))
     return data
 
 

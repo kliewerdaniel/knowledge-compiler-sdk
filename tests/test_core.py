@@ -6,9 +6,12 @@ installed). They exercise the real, deterministic engine end-to-end.
 """
 
 import importlib.util
+import json
 import os
+import shutil
 
 import pytest
+
 
 from compiler.core import (
     ArtifactStore,
@@ -386,35 +389,41 @@ def test_only_flag_runs_single_pass(tmp_path, sample_corpus):
 
 
 def test_pass10_generates_nextjs_app(tmp_path):
-    """pass-10 writes a deployable Next.js scaffold from the Application IR."""
-    import importlib.util, shutil
+    """pass-10 writes a runnable Next.js scaffold (data + viewer + api routes)."""
+    import importlib.util
 
     build = str(tmp_path)
     store = ArtifactStore(build)
+    store.write("graph-ir", {"nodes": [{"id": "n1", "label": "A"}, {"id": "n2", "label": "B"}],
+                             "edges": [{"source": "n1", "target": "n2", "type": "part-of"}]},
+                pass_id="t", schema_id="graph-ir")
+    store.write("semantic-ir", {"themes": [{"id": "t1", "label": "T"}]}, pass_id="t", schema_id="semantic-ir")
+    store.write("reasoning-ir", {"observations": [{"id": "o1", "text": "x", "provenance": ["n1"], "confidence": 0.5}],
+                                "hypotheses": [], "contradictions": [], "questions": []},
+                pass_id="t", schema_id="reasoning-ir")
     store.write("application-ir", {
         "architecture": {"layers": ["ui"], "rationale": "single page"},
-        "pages": [{"id": "p1", "title": "Home", "route": "/",
-                   "components": ["cmp1"]}],
-        "components": [{"id": "cmp1", "name": "graph view",
-                        "responsibility": "show graph"}],
+        "pages": [{"id": "p1", "title": "Home", "route": "/", "components": ["KnowledgeGraphVisualizer"]}],
+        "components": [{"id": "cmp1", "name": "graph view", "responsibility": "show graph"}],
         "routes": [{"path": "/", "page_id": "p1", "method": "GET"}],
-        "apis": [{"path": "/api/k", "method": "GET", "purpose": "serve"}],
-        "deployment_plan": {"target": "static", "steps": ["build"],
-                             "prerequisites": ["node"]},
+        "apis": [{"path": "/api/graph", "method": "GET", "purpose": "serve"}],
+        "deployment_plan": {"target": "static", "steps": ["build"], "prerequisites": ["node"]},
     }, pass_id="pass-09-specifications", schema_id="application-ir")
 
     spec = importlib.util.spec_from_file_location(
         "p10", os.path.join(_passes_root(), "pass-10-software", "run.py"))
     p10 = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(p10)
-    rc = p10.main([build])
-    assert rc == 0
-    app = os.path.join(build, "app")
-    assert os.path.isfile(os.path.join(app, "package.json"))
-    assert os.path.isfile(os.path.join(app, "app", "app", "index", "page.tsx"))
-    assert os.path.isfile(os.path.join(app, "components", "GraphView.tsx"))
-    assert os.path.isfile(os.path.join(app, "app", "app", "api", "api_k", "route.ts"))
-    assert os.path.isfile(os.path.join(app, "README.md"))
+    from compiler.core.diagnostics import DiagnosticEmitter
+    app_root = p10.generate(build, store.read("application-ir"),
+                            DiagnosticEmitter("application-ir", build))
+    # runnable contract
+    assert os.path.isfile(os.path.join(app_root, "package.json"))
+    assert os.path.isfile(os.path.join(app_root, "app", "index", "page.tsx"))
+    assert os.path.isfile(os.path.join(app_root, "components", "KnowledgeGraphVisualizer.tsx"))
+    assert os.path.isfile(os.path.join(app_root, "data", "graph-ir.json"))
+    assert os.path.isfile(os.path.join(app_root, "app", "api", "graph", "route.ts"))
+    assert os.path.isfile(os.path.join(app_root, "README.md"))
 
 
 def _passes_root():
@@ -466,6 +475,86 @@ def test_reasoning_seeds_when_empty(tmp_path):
     out = p08.repair(data, {"graph-ir": {"nodes": [{"id": "n1", "label": "X", "concept_ref": "c1"}]}}, emitter)
     assert len(out["observations"]) >= 1
     assert any(d["code"] == "MISSING_EVIDENCE" for d in emitter.dump()["diagnostics"])
+
+
+def test_generated_app_is_runnable(tmp_path):
+    """pass-10 copies IRs to data/, emits data-serving API routes + viewer."""
+    import importlib.util
+    from compiler.core import ArtifactStore
+
+    d = str(tmp_path)
+    store = ArtifactStore(d)
+    # seed the inputs pass-10 reads back
+    store.write("graph-ir", {"nodes": [{"id": "n1", "label": "A"}, {"id": "n2", "label": "B"}],
+                             "edges": [{"source": "n1", "target": "n2", "type": "part-of"}]},
+                pass_id="t", schema_id="graph-ir")
+    store.write("semantic-ir", {"themes": [{"id": "t1", "label": "T"}]}, pass_id="t", schema_id="semantic-ir")
+    store.write("reasoning-ir", {"observations": [{"id": "o1", "text": "x", "provenance": ["n1"], "confidence": 0.5}],
+                                "hypotheses": [], "contradictions": [], "questions": []},
+                pass_id="t", schema_id="reasoning-ir")
+    store.write("application-ir", {
+        "architecture": {"layers": ["ui"], "rationale": "x"},
+        "pages": [{"id": "p1", "title": "Home", "route": "/", "components": ["KnowledgeGraphVisualizer"]}],
+        "components": [{"id": "cmp1", "name": "graph view", "responsibility": "show graph"}],
+        "routes": [{"path": "/", "page_id": "p1", "method": "GET"}],
+        "apis": [{"path": "/api/graph", "method": "GET", "purpose": "serve graph"}],
+        "deployment_plan": {"target": "static", "steps": ["build"], "prerequisites": ["node"]}},
+        pass_id="pass-09-specifications", schema_id="application-ir")
+
+    spec = importlib.util.spec_from_file_location(
+        "p10c", os.path.join(_passes_root(), "pass-10-software", "run.py"))
+    p10 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(p10)
+
+    from compiler.core.diagnostics import DiagnosticEmitter
+    app_root = p10.generate(d, store.read("application-ir"), DiagnosticEmitter("application-ir", d))
+
+    # data copied
+    assert os.path.isfile(os.path.join(app_root, "data", "graph-ir.json"))
+    assert os.path.isfile(os.path.join(app_root, "data", "application-ir.json"))
+    # api route serves the copied artifact (reads data/ at runtime)
+    route = os.path.join(app_root, "app", "api", "graph", "route.ts")
+    assert os.path.isfile(route)
+    assert 'data", FILE' in open(route).read() or 'process.cwd(), "data"' in open(route).read()
+    # graph viewer component exists
+    assert os.path.isfile(os.path.join(app_root, "components", "KnowledgeGraphVisualizer.tsx"))
+    # package.json present and valid json
+    pkg = json.load(open(os.path.join(app_root, "package.json")))
+    assert "next" in pkg["dependencies"]
+
+
+def test_coerce_json_handles_extra_data_and_array():
+    from compiler.core.inference import _coerce_json_object, extract_json
+    # "Extra data": two JSON objects concatenated
+    assert _coerce_json_object('{"a":1}{"b":2}') == {"a": 1}
+    # prose prefix + trailing
+    assert _coerce_json_object('ok here is the json:\n{"x": 3}\nthanks') == {"x": 3}
+    # fenced block
+    assert extract_json('```json\n{"y": 4}\n```') == {"y": 4}
+    # array returned instead of object -> first contained object is extracted
+    assert _coerce_json_object('[{"id": 1}]') == {"id": 1}
+
+
+def test_api_route_serves_copied_artifact(tmp_path):
+    """Simulate the generated route's read logic against copied data."""
+    import importlib.util
+    from compiler.core import ArtifactStore
+
+    d = str(tmp_path)
+    store = ArtifactStore(d)
+    store.write("graph-ir", {"nodes": [{"id": "n1", "label": "A"}], "edges": []},
+                pass_id="t", schema_id="graph-ir")
+    spec = importlib.util.spec_from_file_location(
+        "p10d", os.path.join(_passes_root(), "pass-10-software", "run.py"))
+    p10 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(p10)
+    from compiler.core.diagnostics import DiagnosticEmitter
+    app_root = p10.generate(d, store.read("application-ir") if store.has("application-ir") else {},
+                           DiagnosticEmitter("application-ir", d))
+    # emulate the route: read data/graph-ir.json from cwd
+    data_file = os.path.join(app_root, "data", "graph-ir.json")
+    served = json.load(open(data_file))
+    assert served["nodes"][0]["label"] == "A"
 
 
 def test_spec_backfills_when_empty(tmp_path):

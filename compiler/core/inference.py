@@ -144,7 +144,12 @@ class InferenceClient:
         return msg.content or "", getattr(msg, "reasoning_content", None) or ""
 
     def complete_json(self, system: str, user: str, temperature: float = 0.2) -> dict:
-        """Conversation wrapper that returns parsed JSON from the model."""
+        """Conversation wrapper that returns parsed JSON from the model.
+
+        Uses :func:`_coerce_json_object` so local models that emit extra/trailing
+        JSON (the ``json.JSONDecodeError: Extra data`` case) still yield a usable
+        object — we take the first well-formed one.
+        """
         text = self.chat(
             [
                 {"role": "system", "content": system},
@@ -152,7 +157,7 @@ class InferenceClient:
             ],
             temperature=temperature,
         )
-        return extract_json(text)
+        return _coerce_json_object(text)
 
     # -- embeddings --------------------------------------------------------
     def embeddings(
@@ -228,19 +233,77 @@ class _EmbedUnsupported(Exception):
 
 
 def extract_json(text: str) -> dict:
-    """Defensively parse JSON out of a model response.
+    """Defensively parse a JSON object out of a model response.
 
-    Strips ```json fenced blocks and extracts the outermost ``{...}`` object so
-    that models which prepend prose or wrap output in fences still parse.
+    Handles the common failure modes of local models:
+      * ```json fenced blocks
+      * prose before/after the JSON
+      * multiple JSON objects ("Extra data") — takes the first
+      * a JSON array instead of an object (wraps it as {"items": [...]})
     """
-    text = text.strip()
+    text = (text or "").strip()
+    # strip a leading fence (``` or ```json ...)
     if text.startswith("```"):
-        # drop the opening fence and optional language tag
-        text = text.split("```", 2)[1]
+        parts = text.split("```")
+        # parts[0] is empty, parts[1] is the body, remaining are trailing fences
+        text = parts[1] if len(parts) > 1 else text
         if text.startswith("json"):
             text = text[4:]
+    text = text.strip()
+
     start = text.find("{")
     end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        raise ValueError("model response did not contain a JSON object")
-    return json.loads(text[start : end + 1])
+    if start != -1 and end > start:
+        candidate = text[start : end + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass  # fall through to array handling / re-raise
+
+    # maybe the model returned a JSON array
+    as_ = text.find("[")
+    ae = text.rfind("]")
+    if as_ != -1 and ae > as_:
+        try:
+            arr = json.loads(text[as_ : ae + 1])
+            return {"items": arr}
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError("model response did not contain a JSON object")
+
+
+def _coerce_json_object(raw: str) -> dict:
+    """Like ``extract_json`` but also tolerates 'Extra data' (multiple objects).
+
+    Some local models emit ``{...}{...}`` or ``{...}\n{...}``. We take the first
+    complete object via a relaxed scan.
+    """
+    raw = (raw or "").strip()
+    if "}" in raw and "{" in raw:
+        # try progressively: first balanced object from the first brace
+        depth = 0
+        in_str = False
+        esc = False
+        for i, ch in enumerate(raw):
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = raw[: i + 1]
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        break
+    return extract_json(raw)

@@ -4,9 +4,11 @@ produces: application-ir
 consumes: [application-ir, reasoning-ir, semantic-ir]
 downstream: []
 entrypoint: run.py
-deterministic: false
-model_required: true
-description: >
-  Expand the specification into architecture, pages, components, routes, APIs,
-  and a deployment plan. Final Application IR stage; emits deployable scaffolds
-  (e.g. a Next.js app) plus diagrams.
+deterministic: true
+model_required: false
+description: >-
+  Read the Application IR (produced by pass-09) and emit a runnable Next.js
+  scaffold (pages, components, API routes serving the compiled data, an SVG
+  knowledge-graph viewer) under build/app/. Deterministic code generation; no
+  model call. Validation/repair backfills a valid scaffold if sections are
+  missing.
