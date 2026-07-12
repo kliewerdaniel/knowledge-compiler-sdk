@@ -55,8 +55,29 @@ def repair(data, inputs, emitter: DiagnosticEmitter) -> dict:
     nodes = data.get("nodes", [])
     node_ids = {n.get("id") for n in nodes if n.get("id")}
     if not node_ids:
-        emitter.error("MISSING_EVIDENCE", "graph produced zero nodes")
-        return data
+        # The model returned an empty graph. Backfill with the most fundamental
+        # units we have - one node per source document - so downstream passes
+        # (embeddings, reasoning, app generation) still have a workable graph.
+        # This is honest degradation, not silent success: we flag it.
+        md = inputs.get("markdown-ir", {}) or {}
+        docs = md.get("documents", []) or []
+        if docs:
+            emitter.warning(
+                "EMPTY_GRAPH_BACKFILL",
+                f"model returned 0 nodes; backfilling {len(docs)} document nodes",
+            )
+            nodes = [
+                {"id": d.get("id", f"doc-{i+1}"),
+                 "label": d.get("title") or d.get("id", f"doc-{i+1}"),
+                 "kind": "document",
+                 "concept_ref": None}
+                for i, d in enumerate(docs)
+            ]
+            data["nodes"] = nodes
+            node_ids = {n["id"] for n in nodes}
+        else:
+            emitter.error("MISSING_EVIDENCE", "graph produced zero nodes")
+            return data
 
     edges = data.get("edges", [])
     kept = []
@@ -160,6 +181,8 @@ def main() -> int:
         user_prompt_fn=build_user_prompt,
         port=ns.port,
         model=ns.model,
+        timeout=ns.timeout,
+        max_tokens=ns.max_tokens,
         prompt_file=os.path.join(os.path.dirname(__file__), "prompt.md"),
         repair_fn=repair,
     )

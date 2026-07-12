@@ -49,7 +49,7 @@ class InferenceClient:
         host: str = "localhost",
         model: Optional[str] = None,
         api_key: str = "not-needed",
-        timeout: float = 120.0,
+        timeout: float = 900.0,
         connect_timeout: float = 2.0,
         ollama_host: str = "localhost",
         ollama_port: int = 11434,
@@ -98,7 +98,7 @@ class InferenceClient:
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.2,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
     ) -> str:
         """Send chat ``messages`` and return the assistant text.
 
@@ -125,7 +125,7 @@ class InferenceClient:
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.2,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
     ):
         """Like :meth:`chat` but also returns the model's reasoning trace."""
         kwargs: Dict = dict(
@@ -143,12 +143,15 @@ class InferenceClient:
         msg = resp.choices[0].message
         return msg.content or "", getattr(msg, "reasoning_content", None) or ""
 
-    def complete_json(self, system: str, user: str, temperature: float = 0.2) -> dict:
+    def complete_json(self, system: str, user: str, temperature: float = 0.2,
+                      max_tokens: int = 8192) -> dict:
         """Conversation wrapper that returns parsed JSON from the model.
 
         Uses :func:`_coerce_json_object` so local models that emit extra/trailing
         JSON (the ``json.JSONDecodeError: Extra data`` case) still yield a usable
-        object — we take the first well-formed one.
+        object — we take the first well-formed one. ``max_tokens`` caps the
+        generation; raise it for large corpora (reasoning models spend tokens on
+        their trace before the answer, so the JSON answer needs headroom).
         """
         text = self.chat(
             [
@@ -156,6 +159,7 @@ class InferenceClient:
                 {"role": "user", "content": user},
             ],
             temperature=temperature,
+            max_tokens=max_tokens,
         )
         return _coerce_json_object(text)
 

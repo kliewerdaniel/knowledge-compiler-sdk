@@ -229,7 +229,7 @@ def test_run_model_pass_with_stubbed_client(tmp_path, monkeypatch):
                 pass_id="pass-01-parse")
 
     class _StubClient:
-        def complete_json(self, system, user, temperature=0.2):
+        def complete_json(self, system, user, temperature=0.2, **kwargs):
             return {"entities": [{"id": "e1", "label": "X", "type": "concept",
                                   "span": {"doc": "doc-1", "section": "sec-1-1"},
                                   "confidence": 0.9}],
@@ -265,7 +265,7 @@ def test_model_pass_retries_on_failure(tmp_path, monkeypatch):
     calls = {"n": 0}
 
     class _FlakyClient:
-        def complete_json(self, system, user, temperature=0.2):
+        def complete_json(self, system, user, temperature=0.2, **kwargs):
             calls["n"] += 1
             if calls["n"] < 3:
                 # simulate a model that emits garbage / no JSON object
@@ -299,7 +299,7 @@ def test_model_pass_gives_up_after_max_retries(tmp_path, monkeypatch):
     store.write("markdown-ir", {"documents": [{"id": "doc-1"}]}, pass_id="pass-01-parse")
 
     class _AlwaysBad:
-        def complete_json(self, system, user, temperature=0.2):
+        def complete_json(self, system, user, temperature=0.2, **kwargs):
             raise ValueError("no json")
 
     monkeypatch.setattr(llm_pass, "InferenceClient", lambda *a, **k: _AlwaysBad())

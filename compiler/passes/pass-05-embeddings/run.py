@@ -35,6 +35,8 @@ def parse_args(argv):
     ap.add_argument("--port", type=int, default=int(os.environ.get("KC_PORT", "8080")))
     ap.add_argument("--model", default=os.environ.get("KC_MODEL"))
     ap.add_argument("--embed-model", default=os.environ.get("KC_EMBED_MODEL"))
+    ap.add_argument("--timeout", type=float,
+                    default=float(os.environ.get("KC_TIMEOUT", "900")))
     return ap.parse_args(argv)
 
 
@@ -54,7 +56,8 @@ def main(argv=None) -> int:
 
     try:
         client = InferenceClient(
-            port=ns.port, model=ns.model, embedding_model=ns.embed_model
+            port=ns.port, model=ns.model, embedding_model=ns.embed_model,
+            timeout=ns.timeout,
         )
     except RuntimeError as e:
         print(f"error: {e}", file=sys.stderr)

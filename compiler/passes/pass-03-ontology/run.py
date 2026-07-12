@@ -130,6 +130,8 @@ def main() -> int:
         user_prompt_fn=build_user_prompt,
         port=ns.port,
         model=ns.model,
+        timeout=ns.timeout,
+        max_tokens=ns.max_tokens,
         prompt_file=os.path.join(os.path.dirname(__file__), "prompt.md"),
         repair_fn=repair,
     )

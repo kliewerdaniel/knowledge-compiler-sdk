@@ -174,6 +174,8 @@ class Compiler:
         incremental: bool = False,
         only: Optional[str] = None,
         embed_model: Optional[str] = None,
+        timeout: float = 900.0,
+        max_tokens: int = 8192,
     ) -> Dict:
         if only:
             # Single-pass plan: only the named pass runs (inputs must pre-exist).
@@ -211,7 +213,7 @@ class Compiler:
                 record["status"] = "ok" if ok else "failed"
             elif local and decl.model_required and os.path.isfile(entry):
                 # Model pass executed against the user's local inference server.
-                ok = self._exec_model_pass(decl, port, model, embed_model)
+                ok = self._exec_model_pass(decl, port, model, embed_model, timeout, max_tokens)
                 record["status"] = "ok" if ok else "failed"
                 if not ok:
                     record["reason"] = "local inference failed"
@@ -320,7 +322,8 @@ class Compiler:
 
     def _exec_model_pass(
         self, decl: "PassDeclaration", port: int, model: Optional[str],
-        embed_model: Optional[str] = None,
+        embed_model: Optional[str] = None, timeout: float = 900.0,
+        max_tokens: int = 8192,
     ) -> bool:
         entry = os.path.join(decl.path, "run.py")
         if not os.path.isfile(entry):
@@ -331,12 +334,13 @@ class Compiler:
             cmd += ["--model", model]
         if embed_model:
             cmd += ["--embed-model", embed_model]
+        cmd += ["--timeout", str(timeout), "--max-tokens", str(max_tokens)]
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=900,
+                timeout=max(1800.0, timeout + 300.0),
                 env=self._pass_env(),
             )
             if result.returncode != 0:

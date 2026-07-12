@@ -56,6 +56,8 @@ def run_model_pass(
     repair_fn: Optional[Callable[[dict, Dict[str, dict], DiagnosticEmitter], dict]] = None,
     augment: bool = False,
     max_retries: int = 3,
+    timeout: float = 900.0,
+    max_tokens: int = 8192,
 ) -> int:
     """Execute a model-required pass against the local inference server.
 
@@ -94,7 +96,7 @@ def run_model_pass(
     user_prompt = user_prompt_fn(inputs)
 
     try:
-        client = InferenceClient(port=port, model=model)
+        client = InferenceClient(port=port, model=model, timeout=timeout)
     except RuntimeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -114,7 +116,7 @@ def run_model_pass(
             )
             time.sleep(min(2 ** attempt, 8))  # exponential backoff (capped)
         try:
-            data = client.complete_json(system_prompt, user_prompt)
+            data = client.complete_json(system_prompt, user_prompt, max_tokens=max_tokens)
             last_err = None
             break
         except Exception as e:  # noqa: BLE001 - surface model/parse failures clearly
@@ -172,4 +174,18 @@ def parse_port_model(argv) -> argparse.Namespace:
     ap.add_argument("--port", type=int, default=int(os.environ.get("KC_PORT", "8080")))
     ap.add_argument("--model", default=os.environ.get("KC_MODEL"))
     ap.add_argument("--embed-model", default=os.environ.get("KC_EMBED_MODEL"))
+    ap.add_argument(
+        "--timeout",
+        type=float,
+        default=float(os.environ.get("KC_TIMEOUT", "900")),
+        help="Per-request timeout (seconds) for the local inference server "
+             "(env KC_TIMEOUT). Raise for slow CPU inference / large corpora.",
+    )
+    ap.add_argument(
+        "--max-tokens",
+        type=int,
+        default=int(os.environ.get("KC_MAX_TOKENS", "8192")),
+        help="Max generation tokens per model call (env KC_MAX_TOKENS). Raise "
+             "for large corpora so reasoning models have room for the JSON answer.",
+    )
     return ap.parse_known_args(argv)[0]

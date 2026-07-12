@@ -69,6 +69,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ollama embedding model for the fallback path (env KC_EMBED_MODEL).",
     )
     ap.add_argument(
+        "--timeout",
+        type=float,
+        default=float(os.environ.get("KC_TIMEOUT", "900")),
+        help="Per-request timeout (seconds) for the local inference server "
+             "(env KC_TIMEOUT). Raise for slow CPU inference / large corpora.",
+    )
+    ap.add_argument(
+        "--max-tokens",
+        type=int,
+        default=int(os.environ.get("KC_MAX_TOKENS", "8192")),
+        help="Max generation tokens per model call (env KC_MAX_TOKENS). Raise "
+             "for large corpora so reasoning models have room for the JSON answer.",
+    )
+    ap.add_argument(
         "--incremental",
         action="store_true",
         help="Skip passes whose output already exists and whose inputs are "
@@ -123,6 +137,8 @@ def main(argv=None) -> int:
         incremental=args.incremental or args.resume,
         only=args.only,
         embed_model=args.embed_model,
+        timeout=args.timeout,
+        max_tokens=args.max_tokens,
     )
 
     steps = summary["plan"]["steps"]
