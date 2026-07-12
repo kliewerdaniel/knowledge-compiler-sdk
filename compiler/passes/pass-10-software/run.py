@@ -334,17 +334,32 @@ def generate(build_dir: str, app: dict, emit: DiagnosticEmitter) -> None:
             _write(app_root, f"app/api/{seg}/route.ts", _api_route_ts(target))
 
     # ---- components -------------------------------------------------------
+    # Build the set of component names actually needed: declared components
+    # PLUS every component any page imports. The model sometimes references
+    # component ids in pages that aren't in the components list, so we write a
+    # stub for any referenced name that has no real implementation. This keeps
+    # the generated app buildable (no missing-module errors) instead of failing
+    # the whole deploy on a model-output inconsistency.
     components = {c.get("id"): c for c in app.get("components", [])}
-    for c in app.get("components", []):
-        name = to_pascal(c.get("name", c.get("id")))
-        resp = c.get("responsibility", "Generated component.")
-        code = (
+
+    def _component_stub(name: str, resp: str = "Generated component.") -> str:
+        n = to_pascal(name)
+        return (
             f"// {resp}\n"
-            f"export default function {name}() {{\n"
-            f"  return <div className=\"{name}\">{name}</div>;\n"
+            f"export default function {n}() {{\n"
+            f"  return <div className=\"{n}\">{n}</div>;\n"
             f"}}\n"
         )
-        _write(app_root, f"components/{name}.tsx", code)
+
+    needed = {to_pascal(c.get("name", c.get("id"))) for c in app.get("components", [])}
+    for p in app.get("pages", []) or []:
+        for c in p.get("components", []):
+            needed.add(to_pascal(components[c]["name"]) if c in components else to_pascal(str(c)))
+
+    for name in sorted(needed):
+        c = next((x for x in app.get("components", []) if to_pascal(x.get("name", x.get("id"))) == name), None)
+        resp = (c or {}).get("responsibility", "Generated component.")
+        _write(app_root, f"components/{name}.tsx", _component_stub(name, resp))
 
     # always include the graph viewer (renders /api/graph)
     _write(app_root, "components/KnowledgeGraphVisualizer.tsx", GRAPH_VIEWER_TSX)
