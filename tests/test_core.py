@@ -615,6 +615,17 @@ def test_generated_app_is_runnable(tmp_path):
         "deployment_plan": {"target": "static", "steps": ["build"], "prerequisites": ["node"]}},
         pass_id="pass-09-specifications", schema_id="application-ir")
 
+    # seed 9-dimension evaluations so the app's /evaluation route has data
+    for art in ("graph-ir", "semantic-ir", "reasoning-ir", "application-ir"):
+        os.makedirs(os.path.join(d, art), exist_ok=True)
+        with open(os.path.join(d, art, "evaluation.json"), "w") as fh:
+            json.dump({"artifact_type": art,
+                       "scores": {k: 0.8 for k in
+                                  ["completeness", "correctness", "coverage",
+                                   "consistency", "hallucination", "traceability",
+                                   "provenance", "confidence", "reproducibility"]},
+                       "overall": 0.8}, fh)
+
     spec = importlib.util.spec_from_file_location(
         "p10c", os.path.join(_passes_root(), "pass-10-software", "run.py"))
     p10 = importlib.util.module_from_spec(spec)
@@ -626,6 +637,14 @@ def test_generated_app_is_runnable(tmp_path):
     # data copied
     assert os.path.isfile(os.path.join(app_root, "data", "graph-ir.json"))
     assert os.path.isfile(os.path.join(app_root, "data", "application-ir.json"))
+    # evaluations folded into one file for the /evaluation route
+    assert os.path.isfile(os.path.join(app_root, "data", "evaluations.json"))
+    ev = json.load(open(os.path.join(app_root, "data", "evaluations.json")))
+    assert isinstance(ev, list) and len(ev) == 4
+    # evaluation API route + page + component exist
+    assert os.path.isfile(os.path.join(app_root, "app", "api", "evaluation", "route.ts"))
+    assert os.path.isfile(os.path.join(app_root, "app", "evaluation", "page.tsx"))
+    assert os.path.isfile(os.path.join(app_root, "components", "EvaluationDashboard.tsx"))
     # api route serves the copied artifact (reads data/ at runtime)
     route = os.path.join(app_root, "app", "api", "graph", "route.ts")
     assert os.path.isfile(route)

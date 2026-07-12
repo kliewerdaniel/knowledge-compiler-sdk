@@ -33,6 +33,11 @@ from compiler.core.artifacts import ArtifactStore  # noqa: E402
 from compiler.core.llm_pass import parse_port_model, run_model_pass  # noqa: E402
 from compiler.core.diagnostics import DiagnosticEmitter  # noqa: E402
 
+try:
+    from compiler.reports.dashboard import collect as _collect_evals  # noqa: E402
+except ImportError:  # pragma: no cover - fallback when imported as a package
+    from ..reports.dashboard import collect as _collect_evals  # noqa: E402
+
 PRODUCES = "application-ir"
 CONSUMES = ["reasoning-ir", "semantic-ir", "graph-ir"]
 
@@ -68,6 +73,16 @@ def _copy_artifacts(build_dir: str, app_root: str, emit: DiagnosticEmitter) -> d
             with open(fname, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             present[art] = f"{art}.json"
+    # Fold the 9-dimension evaluations into a single file for the app's
+    # /evaluation route (observability built into the generated app).
+    try:
+        evals = _collect_evals(build_dir)
+    except Exception as e:  # noqa: BLE001 - never let eval copy break the app
+        evals = []
+        emit.warning("NO_EVAL_DATA", f"could not read evaluations: {e}")
+    with open(os.path.join(data_dir, "evaluations.json"), "w", encoding="utf-8") as f:
+        json.dump(evals, f, ensure_ascii=False, indent=2)
+    present["evaluations"] = "evaluations.json"
     if not present:
         emit.warning("NO_DATA", "no compiled IRs found to embed in the app")
     return present
@@ -155,6 +170,59 @@ export default function KnowledgeGraphVisualizer() {
 # main generation
 # ---------------------------------------------------------------------------
 
+EVAL_DASHBOARD_TSX = """'use client';
+import { useEffect, useState } from 'react';
+
+type Rec = { artifact: string; overall: number; scores: Record<string, number> };
+const DIMS = ['completeness','correctness','coverage','consistency','hallucination','traceability','provenance','confidence','reproducibility'];
+
+function color(v: number): string {
+  if (v >= 0.75) return '#16a34a';
+  if (v >= 0.5) return '#d97706';
+  return '#dc2626';
+}
+
+export default function EvaluationDashboard() {
+  const [recs, setRecs] = useState<Rec[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    fetch('/api/evaluation')
+      .then((r) => r.json())
+      .then((d) => setRecs(Array.isArray(d) ? d : []))
+      .catch((e) => setErr(String(e)));
+  }, []);
+  if (err) return <div className="error">eval error: {err}</div>;
+  if (!recs) return <div>Loading evaluation…</div>;
+  if (recs.length === 0) return <div>No evaluation data.</div>;
+
+  return (
+    <div>
+      {recs.map((r) => (
+        <div key={r.artifact} style={{ marginBottom: '1.2rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.8rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'ui-monospace, monospace' }}>
+            <strong>{r.artifact}</strong>
+            <span style={{ color: color(r.overall), fontWeight: 700 }}>{Math.round(r.overall * 100)}</span>
+          </div>
+          {DIMS.map((d) => {
+            const v = r.scores[d] || 0;
+            return (
+              <div key={d} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: 12, marginTop: 4 }}>
+                <span style={{ width: 104, color: '#64748b', textTransform: 'capitalize' }}>{d}</span>
+                <span style={{ flex: 1, height: 8, background: '#e2e8f0', borderRadius: 5, overflow: 'hidden' }}>
+                  <span style={{ display: 'block', height: '100%', width: `${Math.round(v * 100)}%`, background: color(v) }} />
+                </span>
+                <span style={{ width: 28, textAlign: 'right' }}>{Math.round(v * 100)}</span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+"""
+
+
 def generate(build_dir: str, app: dict, emit: DiagnosticEmitter) -> None:
     # The generated Next.js project lives in ``<build>/knowledge-app``. We avoid
     # naming it ``app`` so the Next App Router dir (``knowledge-app/app``) is the
@@ -230,6 +298,9 @@ def generate(build_dir: str, app: dict, emit: DiagnosticEmitter) -> None:
             _write(app_root, f"app/api/{base}/route.ts",
                    _api_route_ts(present[art]))
 
+    # ---- evaluation API route (observability built into the app) ---------
+    _write(app_root, "app/api/evaluation/route.ts", _api_route_ts(present["evaluations"]))
+
     # ---- model-declared api routes (best-effort mapping) -----------------
     declared = app.get("apis", []) or []
     known_bases = {b for _a, b, _l in CANON}
@@ -262,6 +333,8 @@ def generate(build_dir: str, app: dict, emit: DiagnosticEmitter) -> None:
 
     # always include the graph viewer (renders /api/graph)
     _write(app_root, "components/KnowledgeGraphVisualizer.tsx", GRAPH_VIEWER_TSX)
+    # always include the evaluation dashboard (renders /api/evaluation)
+    _write(app_root, "components/EvaluationDashboard.tsx", EVAL_DASHBOARD_TSX)
 
     # ---- pages ------------------------------------------------------------
     pages = app.get("pages", []) or []
@@ -293,6 +366,19 @@ def generate(build_dir: str, app: dict, emit: DiagnosticEmitter) -> None:
             f"}}\n"
         )
         _write(app_root, f"app/{rdir}/page.tsx", code)
+
+    # ---- evaluation page (observability built into the generated app) -----
+    _write(app_root, "app/evaluation/page.tsx",
+           "import EvaluationDashboard from \"@/components/EvaluationDashboard\";\n"
+           "export default function Page() {\n"
+           "  return (\n"
+           "    <main style={{ padding: '2rem' }}>\n"
+           "      <h1>Evaluation</h1>\n"
+           "      <p style={{ color: '#64748b', fontSize: 13 }}>9-dimension scorecard for every compiled artifact.</p>\n"
+           "      <EvaluationDashboard />\n"
+           "    </main>\n"
+           "  );\n"
+           "}\n")
 
     # ---- README with deployment plan -------------------------------------
     dp = app.get("deployment_plan", {}) or {}
