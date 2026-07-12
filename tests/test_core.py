@@ -139,8 +139,12 @@ def test_orchestrator_runs_parse_and_plans_rest(registry, sample_corpus, tmp_pat
                 out.write(data)
     summary = compiler.run(target=None, dry_run=False)
     records = {r["pass_id"]: r["status"] for r in summary["records"]}
+    # Deterministic parse runs for real.
     assert records["pass-01-parse"] == "ok"
-    assert records["pass-02-extract"] == "skipped"
+    # Model passes without --local either fail (they now have entrypoints that
+    # try the local server) or are skipped; they must never silently "ok".
+    for pid in ["pass-02-extract", "pass-03-ontology", "pass-10-software"]:
+        assert records[pid] != "ok", f"{pid} should not pass without a server"
     store = ArtifactStore(build)
     assert store.has("markdown-ir")
     assert store.read("markdown-ir")["metadata"]["document_count"] == 2
@@ -187,3 +191,61 @@ def test_pass01_parse_entrypoint(sample_corpus, tmp_path):
     ir = store.read("markdown-ir")
     assert ir["documents"][0]["title"] == "Title One"
     assert ir["document_graph"]["edges"][0]["to"] == "doc-2"
+
+
+# --------------------------------------------------------------------------- #
+# Local inference (port-based) support
+# --------------------------------------------------------------------------- #
+def test_extract_json_strips_fences():
+    from compiler.core.inference import extract_json
+
+    fenced = '```json\n{"a": 1, "b": [2, 3]}\n```'
+    assert extract_json(fenced) == {"a": 1, "b": [2, 3]}
+    prose = 'Here is the result:\n{"entities": [], "terms": [], "claims": []}'
+    assert extract_json(prose)["entities"] == []
+
+
+def test_all_model_passes_have_entrypoints(registry):
+    passes_root = os.path.join(
+        os.path.dirname(__file__), "..", "compiler", "passes"
+    )
+    for decl in registry.all():
+        entry = os.path.join(passes_root, decl.id, "run.py")
+        assert os.path.isfile(entry), f"missing entrypoint for {decl.id}"
+
+
+def test_run_model_pass_with_stubbed_client(tmp_path, monkeypatch):
+    """Exercise the model-pass scaffold without a live server."""
+    from compiler.core import llm_pass
+
+    build = str(tmp_path)
+    store = ArtifactStore(build)
+    # seed an input artifact the pass will consume
+    store.write("markdown-ir", {"documents": [{"id": "doc-1"}]},
+                pass_id="pass-01-parse")
+
+    class _StubClient:
+        def complete_json(self, system, user, temperature=0.2):
+            return {"entities": [{"id": "e1", "label": "X", "type": "concept",
+                                  "span": {"doc": "doc-1", "section": "sec-1-1"},
+                                  "confidence": 0.9}],
+                    "terms": [], "claims": []}
+
+    monkeypatch.setattr(
+        llm_pass, "InferenceClient",
+        lambda *a, **k: _StubClient(),
+    )
+    rc = llm_pass.run_model_pass(
+        build_dir=build,
+        produces="entity-ir",
+        consumes=["markdown-ir"],
+        system_prompt="sys",
+        user_prompt_fn=lambda inputs: "user",
+        port=8080,
+    )
+    assert rc == 0
+    assert store.has("entity-ir")
+    data = store.read("entity-ir")
+    assert data["entities"][0]["label"] == "X"
+    assert store.metadata("entity-ir")["producer_pass"] == "model-pass:entity-ir"
+

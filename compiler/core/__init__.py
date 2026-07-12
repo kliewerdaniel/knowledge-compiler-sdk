@@ -1,8 +1,10 @@
 """Knowledge Compiler SDK — core compiler infrastructure.
 
-This package is the *engine* of the Knowledge Compiler. It is intentionally
-dependency-free (standard library only) so it can run on any machine that has
-Python 3.9+, including the sandboxes autonomous agents execute inside.
+This package is the *engine* of the Knowledge Compiler. The engine itself is
+standard-library + ``pyyaml`` so it runs in minimal agent sandboxes. Local
+model inference is opt-in via ``core.inference`` (requires the ``openai``
+package) and talks to **your own** OpenAI-compatible server (llama.cpp / Ollama
+/ vLLM) on a port you control — no cloud API, no secret.
 
 The core is organised around four ideas:
 
@@ -31,6 +33,8 @@ from .registry import PassDeclaration, PassRegistry
 from .orchestrator import Compiler, Plan
 from .diagnostics import Diagnostic, DiagnosticEmitter, Severity
 from .evaluation import Evaluation, evaluate_artifact, write_evaluation
+from .inference import InferenceClient, extract_json
+from .llm_pass import run_model_pass
 
 __all__ = [
     "ArtifactStore",
@@ -46,6 +50,9 @@ __all__ = [
     "Severity",
     "Evaluation",
     "evaluate_artifact",
+    "InferenceClient",
+    "extract_json",
+    "run_model_pass",
 ]
 
 __version__ = "0.1.0"

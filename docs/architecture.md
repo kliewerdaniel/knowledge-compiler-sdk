@@ -85,7 +85,15 @@ The core (`compiler/core`) is **standard-library only** plus `pyyaml` and
 (optionally) `jsonschema`. That is intentional: autonomous agents run inside
 minimal sandboxes, and the dependency floor must be as low as the task allows.
 The *intelligence* — the model-required passes — lives in the **skills**, which
-agents load on demand. The core never imports an LLM SDK.
+agents load on demand, and executes against **your own** inference server.
+
+**Local-first inference.** Model passes talk to an OpenAI-compatible server
+(llama.cpp / Ollama / vLLM / LM Studio) on a port you control via
+`--local --port 8080 --model <name>` — no cloud API, no key, no data leaving
+the machine. The client (`compiler/core/inference.py`) asks for JSON and the
+model only ever sees structured artifacts, never raw Markdown. Without
+`--local`, model passes are planned and reported as `skipped`; with a dead
+server they report `failed` — the build never fakes an LLM result.
 
 A run looks like this:
 
@@ -100,8 +108,8 @@ semantic-ir  --[pass-08-reasoning]-> reasoning-ir
 ```
 
 The orchestrator computes *which* of these to run to reach a target, executes
-the deterministic ones directly, and plans the model-required ones (letting an
-agent fill them in). See `docs/compiler-phases.md`.
+the deterministic ones directly, and (with `--local`) runs the model ones
+against your server. See `docs/compiler-phases.md`.
 
 ## 5. Why not RAG?
 

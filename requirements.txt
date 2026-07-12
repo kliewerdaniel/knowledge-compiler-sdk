@@ -1,6 +1,10 @@
-# Dependencies for the core engine (kept minimal on purpose).
+# Core engine (required)
 pyyaml
 jsonschema
 
-# Test/CI
+# Tests / CI
 pytest
+
+# Optional: local model inference (only needed for `python -m compiler.run --local`)
+# Works with any OpenAI-compatible server: llama.cpp, Ollama, vLLM, LM Studio.
+openai

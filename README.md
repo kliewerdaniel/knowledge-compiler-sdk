@@ -78,6 +78,31 @@ cat build/plan.json
 what was and wasn't computed. An autonomous agent loads the matching
 `skills/<name>` to fill each one in.
 
+## Local inference (bring your own model)
+
+The model-required passes run against **your own** OpenAI-compatible inference
+server — llama.cpp, Ollama, vLLM, LM Studio, text-generation-webui — on a port
+you control. No cloud API, no API key, no data leaving your machine.
+
+```bash
+# llama.cpp (default port 8080), Ollama (port 11434), or any /v1 server
+python -m compiler.run --source notes --build build --local --port 8080 --model llama3.1
+```
+
+Flags:
+
+| Flag     | Default (env)     | Meaning                                         |
+|----------|-------------------|-------------------------------------------------|
+| `--local`| —                 | Execute model passes via local inference.       |
+| `--port` | `8080` (`KC_PORT`)| Port of the `/v1` inference server.              |
+| `--model`| `KC_MODEL`        | Model name to request from the server.          |
+
+The client (`compiler/core/inference.py`) speaks the OpenAI Chat Completions
+protocol and asks for JSON; the model only ever sees **structured artifacts**,
+never raw Markdown, so intelligence stays in the artifacts. If the server is
+down, model passes report `failed` (not silently `skipped`) — the build stays
+truthful. CI installs `openai` only when the `--local` path is exercised.
+
 ## The pass registry (the extensibility model)
 
 Passes are **declared declaratively** in YAML — not hardcoded. The orchestrator

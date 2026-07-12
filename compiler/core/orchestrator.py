@@ -159,7 +159,14 @@ class Compiler:
         return ordered
 
     # --- execution --------------------------------------------------------
-    def run(self, target: Optional[str] = None, dry_run: bool = False) -> Dict:
+    def run(
+        self,
+        target: Optional[str] = None,
+        dry_run: bool = False,
+        local: bool = False,
+        port: int = 8080,
+        model: Optional[str] = None,
+    ) -> Dict:
         plan = self.plan_to(target)
         records: List[Dict] = []
         produced: set[str] = set(self.store.available())
@@ -174,19 +181,29 @@ class Compiler:
                 "status": "pending",
                 "model_required": decl.model_required,
             }
-            if dry_run or not os.path.isfile(entry):
+            if dry_run:
                 record["status"] = "skipped"
-                record["reason"] = (
-                    "dry_run"
-                    if dry_run
-                    else "no entrypoint script (model pass not implemented in core)"
-                )
-                # Honesty: leave no synthetic artifact so downstream knows it
-                # didn't run. Mark skipped in plan.
+                record["reason"] = "dry_run"
                 plan.skipped.append(decl.id)
-            else:
+            elif os.path.isfile(entry):
+                # Deterministic pass with a real entrypoint — run it directly.
                 ok = self._exec_pass(entry)
                 record["status"] = "ok" if ok else "failed"
+            elif local and decl.model_required:
+                # Model pass executed against the user's local inference server.
+                ok = self._exec_model_pass(decl, port, model)
+                record["status"] = "ok" if ok else "failed"
+                if not ok:
+                    record["reason"] = "local inference failed"
+                    plan.skipped.append(decl.id)
+            else:
+                record["status"] = "skipped"
+                record["reason"] = (
+                    "no entrypoint script"
+                    if not decl.model_required
+                    else "model pass (use --local with a running inference server)"
+                )
+                plan.skipped.append(decl.id)
             produced.add(decl.produces)
             records.append(record)
 
@@ -211,4 +228,35 @@ class Compiler:
             )
             return result.returncode == 0
         except Exception:
+            return False
+
+    def _exec_model_pass(
+        self, decl: "PassDeclaration", port: int, model: Optional[str]
+    ) -> bool:
+        """Execute a model-required pass via the shared llm_pass scaffold.
+
+        The pass directory must contain ``run.py`` (the model entrypoint) that
+        accepts ``<build_dir> --port <p> [--model <m>]`` and uses
+        ``core.llm_pass.run_model_pass``. Because the deterministic branch above
+        only fires when an entrypoint exists, we *require* model passes to ship
+        a ``run.py`` too — it just delegates to the scaffold instead of doing
+        raw parsing. This keeps the orchestrator uniform: every pass is a
+        ``run.py``; the difference is deterministic vs. model-driven.
+        """
+        entry = os.path.join(decl.path, "run.py")
+        if not os.path.isfile(entry):
+            return False
+        try:
+            result = subprocess.run(
+                [sys.executable, entry, self.store.build_dir,
+                 "--port", str(port)] + (["--model", model] if model else []),
+                capture_output=True,
+                text=True,
+                timeout=900,
+            )
+            if result.returncode != 0:
+                sys.stderr.write(result.stderr)
+            return result.returncode == 0
+        except Exception as e:  # pragma: no cover
+            sys.stderr.write(f"model pass {decl.id} error: {e}\n")
             return False

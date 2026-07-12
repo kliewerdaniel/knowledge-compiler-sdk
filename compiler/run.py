@@ -44,6 +44,23 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--dry", action="store_true", help="Plan only; do not execute passes."
     )
+    ap.add_argument(
+        "--local",
+        action="store_true",
+        help="Execute model-required passes against a local OpenAI-compatible "
+        "inference server (llama.cpp / Ollama / vLLM) instead of skipping them.",
+    )
+    ap.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("KC_PORT", "8080")),
+        help="Port of the local inference server (default 8080; env KC_PORT).",
+    )
+    ap.add_argument(
+        "--model",
+        default=os.environ.get("KC_MODEL"),
+        help="Model name to request from the local server (env KC_MODEL).",
+    )
     args = ap.parse_args(argv)
 
     # Stage the source into the build dir so pass-01-parse can find it.
@@ -68,7 +85,13 @@ def main(argv=None) -> int:
     )
 
     compiler = Compiler(registry, build_dir)
-    summary = compiler.run(target=args.target, dry_run=args.dry)
+    summary = compiler.run(
+        target=args.target,
+        dry_run=args.dry,
+        local=args.local,
+        port=args.port,
+        model=args.model,
+    )
 
     steps = summary["plan"]["steps"]
     skipped = summary["plan"]["skipped"]

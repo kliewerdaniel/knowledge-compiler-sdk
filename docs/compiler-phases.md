@@ -78,11 +78,17 @@ Given a target IR, the orchestrator:
 1. Finds the pass that produces it.
 2. Walks its `consumes` backwards, recursively, collecting the passes needed.
 3. Topologically orders them by their `consumes → produces` edges.
-4. Executes each: deterministic passes run their `entrypoint` script directly;
-   model-required passes are *planned* (the orchestrator records them as
-   `skipped` with a reason and leaves them for an agent to fill, so the build
-   is honest about what was and wasn't computed).
+4. Executes each:
+   - **Deterministic passes** run their `entrypoint` script directly.
+   - **Model-required passes** are *planned* (recorded as `skipped` with a
+     reason) unless `--local` is given.
+   - With `--local --port N`, every model pass runs its `entrypoint` against
+     **your own** OpenAI-compatible inference server (llama.cpp / Ollama / vLLM)
+     on that port — no cloud API. The model receives only structured artifacts
+     and returns JSON, which the pass validates and writes. If the server is
+     unavailable the pass reports `failed` rather than faking a result.
 
 Running with `--target application-ir` from a fresh source will plan all ten
-passes; only `pass-01-parse` executes with no model. That is the correct,
-auditable behaviour — the core never fakes an LLM result.
+passes; only `pass-01-parse` executes with no model. With `--local
+--port 8080` (and a server listening) the model passes execute too. That is the
+correct, auditable behaviour — the core never invents LLM output.
