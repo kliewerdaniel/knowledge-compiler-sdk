@@ -179,6 +179,20 @@ treating knowledge like source code.
 
 ---
 
+## The full corpus now runs
+
+The demo compiles the **full 151-post corpus** — **293 entities**, 151 graph
+nodes, 8 thematic clusters, and a reasoning layer (observations, hypotheses,
+contradictions, open questions), all served live from the generated app's
+`/api/*` routes. Getting there required making the compiler *corpus-size
+agnostic*: model passes now **batch** the input into bounded chunks (so a
+150-document call can't exceed the runtime's timeout) and the orchestrator
+gives each pass a multi-hour budget instead of killing it mid-batch. The
+knowledge graph currently renders extracted nodes; relationship/edge extraction
+is the next quality step — but the pipeline is end-to-end and scales.
+
+---
+
 ## Try it
 
 - **Live demo:** https://knowledge-compiler-blog-demo.vercel.app

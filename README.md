@@ -5,8 +5,14 @@
 
 [![Live Demo](https://img.shields.io/badge/live%20demo-knowledge--compiler--blog--demo.vercel.app-blue?style=flat)](https://knowledge-compiler-blog-demo.vercel.app)
 
-**▶ Live demo (compiled from 12 real blog posts):**
+**▶ Live demo (compiled from 151 real blog posts):**
 https://knowledge-compiler-blog-demo.vercel.app
+
+The deployed demo compiles the full 151-post corpus: **293 entities**, 151
+graph nodes, 8 thematic clusters, and a reasoning layer (observations,
+hypotheses, contradictions, open questions) — all served from the generated
+app's `/api/*` routes. (The knowledge graph currently renders extracted nodes;
+edge/relationship extraction is the next quality improvement.)
 
 This is **not** an AI agent framework. **Not** a RAG framework. **Not** a prompt
 collection. It is **compiler infrastructure for knowledge**, in the spirit of
@@ -177,9 +183,10 @@ vercel              # preview
 vercel --prod       # production
 ```
 
-A running example compiled from 12 real blog posts is live at
+A running example compiled from the full 151-post corpus is live at
 **https://knowledge-compiler-blog-demo.vercel.app** (all six routes return 200
-and serve the compiled IRs via `/api/*`).
+and serve the compiled IRs via `/api/*` — 293 entities, 151 graph nodes, 8
+themes, and a reasoning layer).
 
 `vercel.json` is emitted alongside the app (framework `nextjs`, build
 `npm install && npm run build`, output `.next`). The `/api/*` routes become
