@@ -336,11 +336,17 @@ class Compiler:
             cmd += ["--embed-model", embed_model]
         cmd += ["--timeout", str(timeout), "--max-tokens", str(max_tokens)]
         try:
+            # Per-pass wall-clock budget. A batched pass over a large corpus
+            # (e.g. 150 docs in ~13 chunks) can run far longer than a single
+            # model call, so the default floor is 2h (KC_PASS_TIMEOUT), not the
+            # per-call `timeout`. The orchestrator must not kill a pass that is
+            # making steady progress through its batches.
+            pass_timeout = float(os.environ.get("KC_PASS_TIMEOUT", "7200"))
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=max(1800.0, timeout + 300.0),
+                timeout=max(pass_timeout, timeout + 300.0),
                 env=self._pass_env(),
             )
             if result.returncode != 0:
