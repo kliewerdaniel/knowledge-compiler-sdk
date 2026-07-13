@@ -93,35 +93,124 @@ def run_model_pass(
         with open(prompt_file, "r", encoding="utf-8") as fh:
             system_prompt = fh.read()
 
-    user_prompt = user_prompt_fn(inputs)
-
     try:
         client = InferenceClient(port=port, model=model, timeout=timeout)
     except RuntimeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    data = None
+    primary = consumes[0] if consumes else None
+    doc_items: List[tuple] = []
+    if primary and isinstance(inputs.get(primary), dict):
+        # The corpus lives under the primary artifact's "documents" key, which
+        # may be a {doc_id: body} dict OR a [body, ...] list depending on the
+        # pass. Batch over whichever shape we find.
+        docs = inputs[primary].get("documents")
+        if isinstance(docs, dict):
+            doc_items = list(docs.items())
+        elif isinstance(docs, list):
+            doc_items = list(enumerate(docs))
+
+    batch_size = int(os.environ.get("KC_BATCH", "12") or "12")
+    if batch_size < 1:
+        batch_size = len(doc_items) or 1
+
+    def _prompt_for(chunk_items: List[tuple]) -> str:
+        chunk_inputs = dict(inputs)
+        if primary:
+            chunk_inputs[primary] = dict(inputs[primary])
+            orig = inputs[primary].get("documents")
+            if isinstance(orig, dict):
+                chunk_inputs[primary]["documents"] = dict(chunk_items)
+            else:  # list-shaped corpus
+                chunk_inputs[primary]["documents"] = [body for _, body in chunk_items]
+        return user_prompt_fn(chunk_inputs)
+
+    def _name_key(item):
+        """Stable de-dup key for a merged list item.
+
+        Model-generated sequential ids (``ent-1``, ``ent-2`` …) collide across
+        corpus batches, so we key on the *content* (label/name/text) when
+        present and fall back to ``id``. This collapses the same entity
+        extracted from different batches without dropping distinct ones.
+        """
+        if not isinstance(item, dict):
+            return item
+        raw = item.get("label") or item.get("name") or item.get("text") \
+            or item.get("id") or item
+        return str(raw).strip().lower()
+
+    def _merge(a: Optional[dict], b: dict) -> dict:
+        """Accumulate pass output across corpus batches.
+
+        Lists are concatenated (de-duplicating dict items by their content key
+        so a recurring entity/node isn't doubled); dicts are shallow-merged;
+        scalars take the later value.
+        """
+        if a is None:
+            return b
+        if not isinstance(a, dict) or not isinstance(b, dict):
+            return b
+        out = dict(a)
+        for k, v in b.items():
+            if k in out:
+                if isinstance(out[k], list) and isinstance(v, list):
+                    merged = list(out[k])
+                    seen = {_name_key(item) for item in merged}
+                    for item in v:
+                        key = _name_key(item)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        merged.append(item)
+                    out[k] = merged
+                elif isinstance(out[k], dict) and isinstance(v, dict):
+                    out[k] = {**out[k], **v}
+                else:
+                    out[k] = v
+            else:
+                out[k] = v
+        return out
+
+    def _call_with_retries(up: str):
+        last: Optional[Exception] = None
+        base = up
+        for attempt in range(max_retries):
+            if attempt > 0:
+                up = (
+                    base
+                    + f"\n\n[retry {attempt}/{max_retries}] Respond with ONLY a single "
+                    "valid JSON object and nothing else — no markdown fences, no "
+                    "trailing commentary, no extra JSON objects."
+                )
+                time.sleep(min(2 ** attempt, 8))
+            try:
+                return client.complete_json(system_prompt, up, max_tokens=max_tokens), None
+            except Exception as e:  # noqa: BLE001
+                last = e
+                print(f"warn: inference attempt {attempt + 1} failed: {e}", file=sys.stderr)
+        return None, last
+
+    data: Optional[dict] = None
     last_err: Optional[Exception] = None
-    base_prompt = user_prompt
-    for attempt in range(max_retries):
-        # On retries, remind the model to return strict JSON (local models
-        # frequently emit prose or trailing garbage after the object).
-        if attempt > 0:
-            user_prompt = (
-                base_prompt
-                + f"\n\n[retry {attempt}/{max_retries}] Respond with ONLY a single "
-                "valid JSON object and nothing else — no markdown fences, no "
-                "trailing commentary, no extra JSON objects."
-            )
-            time.sleep(min(2 ** attempt, 8))  # exponential backoff (capped)
-        try:
-            data = client.complete_json(system_prompt, user_prompt, max_tokens=max_tokens)
-            last_err = None
-            break
-        except Exception as e:  # noqa: BLE001 - surface model/parse failures clearly
-            last_err = e
-            print(f"warn: inference attempt {attempt + 1} failed: {e}", file=sys.stderr)
+    if not doc_items or len(doc_items) <= batch_size:
+        # Single call — unchanged behaviour for small corpora.
+        up = _prompt_for(doc_items)
+        data, last_err = _call_with_retries(up)
+    else:
+        n_batches = (len(doc_items) + batch_size - 1) // batch_size
+        for bi in range(0, len(doc_items), batch_size):
+            chunk = doc_items[bi:bi + batch_size]
+            up = _prompt_for(chunk)
+            cd, err = _call_with_retries(up)
+            if cd is None:
+                last_err = err
+                print(f"warn: batch {bi // batch_size + 1}/{n_batches} failed: {err}",
+                      file=sys.stderr)
+                continue
+            data = _merge(data, cd)
+            print(f"info: batch {bi // batch_size + 1}/{n_batches} merged "
+                  f"({len(doc_items)} docs total)")
     if data is None:
         print(f"error: inference failed after {max_retries} attempts: {last_err}",
               file=sys.stderr)
