@@ -3,6 +3,11 @@
 > Compile collections of human knowledge into progressively higher-level
 > semantic artifacts — until they generate deployable software.
 
+[![Live Demo](https://img.shields.io/badge/live%20demo-knowledge--compiler--blog--demo.vercel.app-blue?style=flat)](https://knowledge-compiler-blog-demo.vercel.app)
+
+**▶ Live demo (compiled from 12 real blog posts):**
+https://knowledge-compiler-blog-demo.vercel.app
+
 This is **not** an AI agent framework. **Not** a RAG framework. **Not** a prompt
 collection. It is **compiler infrastructure for knowledge**, in the spirit of
 LLVM and GCC — except it compiles Markdown into knowledge instead of C into
@@ -140,11 +145,22 @@ into a **runnable Next.js application** under `build/knowledge-app/`:
 - `data/*.json` — the compiled IRs, copied in so the app is self-contained
 - `knowledge-app/app/api/*/route.ts` — real route handlers that read `data/` and return
   the artifacts as JSON (no external services needed)
-- `knowledge-app/components/KnowledgeGraphVisualizer.tsx` — an SVG knowledge-graph view
-  (zero extra deps) that fetches `/api/graph`
-- `knowledge-app/app/<route>/page.tsx` — one page per declared route
-- `knowledge-app/app/evaluation/page.tsx` — the 9-dimension scorecard (observability built in)
-- `package.json`, `next.config.mjs`, `tsconfig.json`, `vercel.json`, `README.md`
+- `knowledge-app/components/` — a polished, heuristic-driven UI: `Sidebar`,
+  `EntityExplorer` (entities + source-span provenance + linked claims),
+  `GraphCanvas` (interactive SVG knowledge graph), `ReasoningPanel`
+  (observations / hypotheses / contradictions / open questions with provenance),
+  `ThemeClusters` (semantic clusters + summaries), `EvaluationDashboard`
+  (9-dimension scorecard), `StatCard`. Styled with Tailwind + shadcn-style
+  primitives + `framer-motion` transitions, dark "compiled knowledge" theme.
+- `knowledge-app/app/{overview,entities,graph,reasoning,themes,evaluation}/page.tsx`
+  — six routes, each a real view of the compiled IRs (no stub pages)
+- `package.json`, `next.config.mjs`, `tsconfig.json`, `tailwind.config.ts`,
+  `postcss.config.js`, `globals.css`, `vercel.json`, `README.md`
+
+The generated app uses **relative imports only** (Vercel's Next build does not
+honor `@/` tsconfig aliases) and ships `typescript`/`@types/*`/`tailwindcss` in
+`dependencies` so a production `npm install` includes them — both are required
+for a clean `vercel --prod` build.
 
 Run it locally with `cd build/knowledge-app && npm install && npm run dev`
 (open http://localhost:3000; the evaluation dashboard is at `/evaluation`).
@@ -160,6 +176,10 @@ cd build/knowledge-app
 vercel              # preview
 vercel --prod       # production
 ```
+
+A running example compiled from 12 real blog posts is live at
+**https://knowledge-compiler-blog-demo.vercel.app** (all six routes return 200
+and serve the compiled IRs via `/api/*`).
 
 `vercel.json` is emitted alongside the app (framework `nextjs`, build
 `npm install && npm run build`, output `.next`). The `/api/*` routes become
