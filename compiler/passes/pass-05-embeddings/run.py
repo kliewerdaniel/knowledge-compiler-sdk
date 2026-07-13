@@ -23,25 +23,15 @@ _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
+from core.llm_pass import parse_port_model
 from core.inference import InferenceClient
 
 PRODUCES = "semantic-ir"
 CONSUMES = ["graph-ir"]
 
 
-def parse_args(argv):
-    ap = argparse.ArgumentParser()
-    ap.add_argument("build_dir", nargs="?", default=os.getcwd())
-    ap.add_argument("--port", type=int, default=int(os.environ.get("KC_PORT", "8080")))
-    ap.add_argument("--model", default=os.environ.get("KC_MODEL"))
-    ap.add_argument("--embed-model", default=os.environ.get("KC_EMBED_MODEL"))
-    ap.add_argument("--timeout", type=float,
-                    default=float(os.environ.get("KC_TIMEOUT", "900")))
-    return ap.parse_args(argv)
-
-
 def main(argv=None) -> int:
-    ns = parse_args(sys.argv[1:] if argv is None else argv)
+    ns = parse_port_model(sys.argv[1:] if argv is None else argv)
     from compiler.core import ArtifactStore, DiagnosticEmitter, evaluate_artifact, write_evaluation
 
     store = ArtifactStore(ns.build_dir)

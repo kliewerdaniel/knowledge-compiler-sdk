@@ -261,9 +261,10 @@ def generate(build_dir: str, app: dict, emit: DiagnosticEmitter) -> None:
             "lucide-react": "0.417.0",
             "clsx": "2.1.1",
             "tailwind-merge": "2.4.0",
+            "tailwindcss": "3.4.7",
+            "postcss": "8.4.40",
+            "autoprefixer": "10.4.19",
         },
-        "devDependencies": {"tailwindcss": "3.4.7", "postcss": "8.4.40",
-                             "autoprefixer": "10.4.19"},
         "engines": {"node": "22.x"},
     }, indent=2) + "\n")
 
