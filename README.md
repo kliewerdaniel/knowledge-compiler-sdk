@@ -8,6 +8,11 @@
 **▶ Live demo (compiled from 151 real blog posts):**
 https://knowledge-compiler-blog-demo.vercel.app
 
+**Links**
+- Live demo: https://knowledge-compiler-blog-demo.vercel.app/
+- Blog post: https://www.danielkliewer.com/blog/2026-07-14-recursive-research-compiler-knowledge-compiler-sdk
+- NotebookLM: https://notebooklm.google.com/notebook/57b09d32-2e14-4dd3-83a6-204cbc461d4b
+
 The deployed demo compiles the full 151-post corpus: **293 entities**, 209
 graph nodes, **263 typed edges** across a 10-type relationship vocabulary
 (depends-on, enables, implements, refutes, supports, extends, is-part-of,
@@ -187,8 +192,8 @@ vercel --prod       # production
 
 A running example compiled from the full 151-post corpus is live at
 **https://knowledge-compiler-blog-demo.vercel.app** (all six routes return 200
-and serve the compiled IRs via `/api/*` — 293 entities, 151 graph nodes, 8
-themes, and a reasoning layer).
+and serve the compiled IRs via `/api/*` — 293 entities, 209 graph nodes with
+263 typed edges, 8 themes, and a reasoning layer).
 
 `vercel.json` is emitted alongside the app (framework `nextjs`, build
 `npm install && npm run build`, output `.next`). The `/api/*` routes become
