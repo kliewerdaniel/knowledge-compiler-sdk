@@ -1,0 +1,14 @@
+id: pass-04b-relations
+name: Relationship Typing
+produces: relations-ir
+consumes: [graph-ir, ontology-ir, entity-ir, markdown-ir]
+downstream: [semantic-ir]
+entrypoint: run.py
+deterministic: false
+model_required: true
+description: >-
+  Classify each candidate edge in the Knowledge Graph IR into a controlled
+  relationship vocabulary (depends-on, enables, implements, refutes, supports,
+  extends, is-part-of, compares-to, exemplifies, mentions). Discovery is done
+  deterministically in pass-04; this pass adds semantic typing using light
+  source-document grounding.

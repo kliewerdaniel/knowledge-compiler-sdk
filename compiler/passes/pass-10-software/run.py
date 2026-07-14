@@ -72,7 +72,7 @@ def _copy_artifacts(build_dir: str, app_root: str, emit: DiagnosticEmitter) -> d
     os.makedirs(data_dir, exist_ok=True)
     present = {}
     for art in ("markdown-ir", "entity-ir", "ontology-ir", "graph-ir",
-                "semantic-ir", "reasoning-ir", "application-ir"):
+                "relations-ir", "semantic-ir", "reasoning-ir", "application-ir"):
         if store.has(art):
             data = store.read(art)
             fname = os.path.join(data_dir, f"{art}.json")
@@ -374,6 +374,29 @@ def generate(build_dir: str, app: dict, emit: DiagnosticEmitter) -> None:
         if art in present:
             _write(app_root, f"app/api/{base}/route.ts",
                    _api_route_ts(present[art]))
+
+    # ---- graph route: prefer typed relations-ir edges --------------------
+    # The Knowledge Graph page renders typed relationships when available;
+    # falls back to the co-occurrence edges in graph-ir.json otherwise.
+    _write(app_root, "app/api/graph/route.ts",
+           'import { NextResponse } from "next/server";\n'
+           'import { readFileSync } from "fs";\n'
+           'import path from "path";\n\n'
+           'function load(name: string) {\n'
+           '  try {\n'
+           '    const p = path.join(process.cwd(), "data", name);\n'
+           '    return JSON.parse(readFileSync(p, "utf-8"));\n'
+           '  } catch {\n'
+           '    return null;\n'
+           '  }\n'
+           '}\n\n'
+           'export async function GET() {\n'
+           '  const g = load("graph-ir.json") || { nodes: [], edges: [] };\n'
+           '  const r = load("relations-ir.json");\n'
+           '  const typed = r && Array.isArray(r.edges) ? r.edges : [];\n'
+           '  const edges = typed.length ? typed : (g.edges || []);\n'
+           '  return NextResponse.json({ nodes: g.nodes || [], edges });\n'
+           '}\n')
 
     # ---- evaluation API route (observability built into the app) ---------
     _write(app_root, "app/api/evaluation/route.ts", _api_route_ts(present["evaluations"]))

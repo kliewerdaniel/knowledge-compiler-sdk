@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "relations-ir",
+  "title": "Relations IR",
+  "type": "object",
+  "required": ["edges"],
+  "properties": {
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "source", "target", "type"],
+        "properties": {
+          "id": {"type": "string"},
+          "source": {"type": "string"},
+          "target": {"type": "string"},
+          "type": {
+            "type": "string",
+            "description": "Typed relation from the controlled vocabulary, e.g. depends-on, enables, implements, refutes, supports, extends, is-part-of, compares-to, exemplifies, mentions."
+          },
+          "confidence": {"type": "number"},
+          "provenance": {"type": "array", "items": {"type": "string"}},
+          "label": {"type": "string"}
+        }
+      }
+    },
+    "vocabulary": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}
