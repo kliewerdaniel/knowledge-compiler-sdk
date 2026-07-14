@@ -124,7 +124,8 @@ def main(argv=None) -> int:
     # but always include at least all edges with shared >= 2.
     cand = sorted(candidate_edges, key=lambda e: e.get("confidence", 0),
                   reverse=True)
-    top = cand[:400] if len(cand) > 400 else cand
+    sample = int(os.environ.get("KC_REL_SAMPLE", "0") or "0")
+    top = cand[:sample] if sample else (cand[:400] if len(cand) > 400 else cand)
 
     try:
         client = InferenceClient(port=ns.port, model=ns.model, timeout=ns.timeout)
@@ -161,15 +162,15 @@ def main(argv=None) -> int:
             items = resp.get("relations") if isinstance(resp, dict) else None
         if not items and isinstance(resp, list):
             items = resp
-        if not items:
+        if not items and isinstance(resp, dict):
             # Flatten any list-valued key as a fallback.
-            if isinstance(resp, dict):
-                for v in resp.values():
-                    if isinstance(v, list) and v and isinstance(v[0], dict):
-                        items = v
-                        break
+            for v in resp.values():
+                if isinstance(v, list) and v and isinstance(v[0], dict):
+                    items = v
+                    break
         if not items:
             continue
+        for it in items:
             s, t = it.get("source"), it.get("target")
             typ = (it.get("type") or "none").lower()
             if typ in ("none", "") or s not in node_ids or t not in node_ids:
