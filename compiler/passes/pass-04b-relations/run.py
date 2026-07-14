@@ -152,10 +152,24 @@ def main(argv=None) -> int:
         except Exception as ex:  # noqa: BLE001
             print(f"warn: batch {i//batch_size+1} failed: {ex}", file=sys.stderr)
             continue
-        items = resp.get("edges") or []
+        # The model may return the relation array under "edges", "items",
+        # "relations", or as a bare top-level array.
+        items = resp.get("edges") if isinstance(resp, dict) else None
+        if not items:
+            items = resp.get("items") if isinstance(resp, dict) else None
+        if not items:
+            items = resp.get("relations") if isinstance(resp, dict) else None
         if not items and isinstance(resp, list):
             items = resp
-        for it in items:
+        if not items:
+            # Flatten any list-valued key as a fallback.
+            if isinstance(resp, dict):
+                for v in resp.values():
+                    if isinstance(v, list) and v and isinstance(v[0], dict):
+                        items = v
+                        break
+        if not items:
+            continue
             s, t = it.get("source"), it.get("target")
             typ = (it.get("type") or "none").lower()
             if typ in ("none", "") or s not in node_ids or t not in node_ids:
