@@ -9,10 +9,12 @@
 https://knowledge-compiler-blog-demo.vercel.app
 
 The deployed demo compiles the full 151-post corpus: **293 entities**, 209
-graph nodes, **1289 co-occurrence edges** (concepts sharing a source document
-are linked), 8 thematic clusters, and a reasoning layer (observations,
-hypotheses, contradictions, open questions) — all served from the generated
-app's `/api/*` routes.
+graph nodes, **263 typed edges** across a 10-type relationship vocabulary
+(depends-on, enables, implements, refutes, supports, extends, is-part-of,
+compares-to, exemplifies, mentions — classified by the model from
+corpus co-occurrence), 8 thematic clusters, and a reasoning layer
+(observations, hypotheses, contradictions, open questions) — all served from
+the generated app's `/api/*` routes.
 
 This is **not** an AI agent framework. **Not** a RAG framework. **Not** a prompt
 collection. It is **compiler infrastructure for knowledge**, in the spirit of

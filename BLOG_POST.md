@@ -188,14 +188,13 @@ contradictions, open questions), all served live from the generated app's
 agnostic*: model passes now **batch** the input into bounded chunks (so a
 150-document call can't exceed the runtime's timeout) and the orchestrator
 gives each pass a multi-hour budget instead of killing it mid-batch. The
-The knowledge graph now has real edges. The 35B model wouldn't reliably emit
-relationships, so `pass-04` derives them from **corpus co-occurrence**: two
-concepts whose member entities appear in the same blog post are linked
-(`co-occurs-in`, confidence scaled by how many posts they share), capped per
-node so the graph stays readable. The result on the full corpus: 209 concept
-nodes and **1289 edges** (mean degree ~6) — a genuinely connected knowledge
-graph, not a pile of孤立 nodes. Edges the model *does* declare (via the
-ontology's relationships/hierarchies) are still honored on top.
+Each candidate edge from `pass-04` is then **typed** by a second pass
+(`pass-04b-relations`): the 35B model classifies each pair into a 10-type
+vocabulary (`depends-on`, `enables`, `implements`, `refutes`, `supports`,
+`extends`, `is-part-of`, `compares-to`, `exemplifies`, `mentions`) using light
+source-document grounding (the model won't *discover* relationships freely, but
+*labels* given pairs reliably). The full corpus yields **263 typed edges** —
+a genuinely connected, semantically-typed knowledge graph.
 
 ---
 
