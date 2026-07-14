@@ -8,11 +8,11 @@
 **▶ Live demo (compiled from 151 real blog posts):**
 https://knowledge-compiler-blog-demo.vercel.app
 
-The deployed demo compiles the full 151-post corpus: **293 entities**, 151
-graph nodes, 8 thematic clusters, and a reasoning layer (observations,
+The deployed demo compiles the full 151-post corpus: **293 entities**, 209
+graph nodes, **1289 co-occurrence edges** (concepts sharing a source document
+are linked), 8 thematic clusters, and a reasoning layer (observations,
 hypotheses, contradictions, open questions) — all served from the generated
-app's `/api/*` routes. (The knowledge graph currently renders extracted nodes;
-edge/relationship extraction is the next quality improvement.)
+app's `/api/*` routes.
 
 This is **not** an AI agent framework. **Not** a RAG framework. **Not** a prompt
 collection. It is **compiler infrastructure for knowledge**, in the spirit of
